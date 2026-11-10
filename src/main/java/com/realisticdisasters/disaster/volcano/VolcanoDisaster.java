@@ -10,13 +10,19 @@ import com.realisticdisasters.disaster.DisasterManager;
 import com.realisticdisasters.disaster.DisasterProtection;
 import com.realisticdisasters.disaster.DisasterType;
 import com.realisticdisasters.disaster.Phase;
+import com.realisticdisasters.registry.ModRegistries;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.monster.Enemy;
@@ -29,21 +35,25 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * An erupting volcanic vent. On flat ground it first piles up a small cinder cone. During the eruption it throws
- * {@link LavaBombEntity lava bombs}, fires periodic blasts, sends lava flows downhill and lets the lava cool into
- * basalt and blackstone later (batched). Ash, sky, sound and shake are client-side, driven by {@link #syncData()}.
+ * An erupting stratovolcano. Its size scales with intensity: a ~10-block cinder cone at intensity 1 up to a ~130-block
+ * mountain at intensity 5 that grows out of the ground during the eruption ({@link VolcanoEdifice}).
+ * <p>
+ * Server-side physics: lava bombs ({@link LavaBombEntity}), explosive blasts with a pressure wave, a lava lake in the
+ * summit crater that overflows into lava rivers running down the flanks and cooling in two stages, pyroclastic density
+ * currents racing down the mountain ({@link PyroclasticFlow}), ash fall-out blanketing the land downwind
+ * ({@link AshFall}), snow and ice melting into meltwater floods, steaming ground fissures as precursors, volcanic
+ * lightning, fleeing mobs and the ground rising under whatever stands on it. All block changes are batched and checked
+ * against protection. Visuals and sound are client-side, driven by {@link #syncData()}.
  */
 public class VolcanoDisaster extends Disaster {
     /** Indices into the sync data array (shared contract with the client visual). */
     public static final int D_VENT_HEIGHT = 0, D_PLUME_HEIGHT = 1, D_ASH_RADIUS = 2, D_BLASTS = 3, D_CONE_RADIUS = 4,
-            D_WIND_X = 5, D_WIND_Z = 6;
+            D_WIND_X = 5, D_WIND_Z = 6, D_PDC_RADIUS = 7, D_PDC_ANGLE = 8, D_PDC_WIDTH = 9, D_PDC_ON = 10,
+            D_GROWTH = 11, D_MOUNTAIN_HEIGHT = 12, D_PDC_HEAD = 13;
 
-    private final int ventX, ventZ;
+    private int ventX, ventZ;
     private int groundY;
-    private final int coneRadius;
-    private int coneHeight;
-    private boolean buildCone;
-    /** The cone / ground decision waits until the vent area is loaded (a disaster may start before its chunks). */
+    private VolcanoEdifice edifice;
     private boolean terrainDecided;
     private int decideWait;
     private final int maxBombs;
@@ -53,18 +63,21 @@ public class VolcanoDisaster extends Disaster {
     private final List<LavaBombEntity> bombs = new ArrayList<>();
     private final List<FlowHead> flows = new ArrayList<>();
     private final PriorityQueue<Cooling> cooling = new PriorityQueue<>((a, b) -> Long.compare(a.at, b.at));
+    private PyroclasticFlow pdc;
+    private boolean collapsed;
+    /** Test hook: keeps everything within this radius of the vent (GameTest arenas sit close together). */
+    private double confine = Double.MAX_VALUE;
 
-    private int coneLayersQueued;
-    private boolean ventPrepared;
     private int blasts;
     private int nextBlast = 60;
     private int bombsLaunched;
     private int lavaPlaced;
     private int lavaCooled;
     private int rockFormed;
-    private int coneBlocks;
     private int flowsStarted;
     private int lightning;
+    private int pdcCount;
+    private int fissures;
 
     /** stage 0 = molten lava (crusts over into glowing magma), stage 1 = crust (turns into rock). */
     private record Cooling(BlockPos pos, long at, int stage) {}
@@ -83,20 +96,60 @@ public class VolcanoDisaster extends Disaster {
         int i = this.intensity;
         this.ventX = Mth.floor(pos.x);
         this.ventZ = Mth.floor(pos.z);
-        this.groundY = Mth.floor(pos.y) - 1; // pos sits on top of the surface block
-        this.coneRadius = 4 + i;                 // 5 .. 9
+        moveAwayFromPlayers();
+        this.groundY = Mth.floor(this.pos.y) - 1;
         this.maxBombs = Math.max(3, DisasterConfig.VOLCANO_MAX_BOMBS.getAsInt() * i / 5);
-        this.maxLava = 40 + 40 * i;
-        this.plumeHeight = 50f + i * 22f;        // 72 .. 160
-        this.ashRadius = 70f + i * 35f;          // 105 .. 245
+        this.maxLava = 60 + 90 * i;                // lava sources per eruption
+        this.plumeHeight = 60f + i * 45f;          // 105 .. 285 above the vent
+        this.ashRadius = 80f + i * 50f;            // 130 .. 330
         this.windAngle = random.nextDouble() * Math.PI * 2;
         this.pos = new Vec3(ventX + 0.5, groundY + 1, ventZ + 0.5);
 
         double scale = DisasterConfig.VOLCANO_DURATION_SCALE.get();
         setDuration(Phase.WARNING, 400);
-        setDuration(Phase.BUILDUP, 300);
+        setDuration(Phase.BUILDUP, 300 + 60 * i);
         setDuration(Phase.PEAK, (int) ((900 + 300 * i) * scale));
-        setDuration(Phase.AFTERMATH, 500);
+        setDuration(Phase.AFTERMATH, 500 + 100 * i);
+    }
+
+    /** Final mountain height above its base for an intensity (see {@link VolcanoEdifice}). */
+    public static int plannedHeight(int intensity) {
+        return VolcanoEdifice.HEIGHT[Mth.clamp(intensity, 1, 5)];
+    }
+
+    /** Final mountain radius for an intensity (see {@link VolcanoEdifice}). */
+    public static double plannedRadius(int intensity) {
+        return plannedHeight(intensity) * 1.5 + 2;
+    }
+
+    /**
+     * A big volcano started right next to a player would swallow them: move the vent so the nearest player ends up on
+     * the lower flank, if that spot is loaded.
+     */
+    private void moveAwayFromPlayers() {
+        double need = plannedRadius(intensity) * 0.7 + 8;
+        ServerPlayer nearest = null;
+        double best = Double.MAX_VALUE;
+        for (ServerPlayer p : level.players()) {
+            if (p.isSpectator()) continue;
+            double d = Math.hypot(p.getX() - (ventX + 0.5), p.getZ() - (ventZ + 0.5));
+            if (d < best) {
+                best = d;
+                nearest = p;
+            }
+        }
+        if (nearest == null || best >= need) return;
+        Vec3 dir = new Vec3(ventX + 0.5 - nearest.getX(), 0, ventZ + 0.5 - nearest.getZ());
+        dir = dir.lengthSqr() < 1.0e-4 ? new Vec3(1, 0, 0) : dir.normalize();
+        for (double d = need; d > best; d -= 8) {
+            int x = Mth.floor(nearest.getX() + dir.x * d), z = Mth.floor(nearest.getZ() + dir.z * d);
+            if (level.hasChunkAt(new BlockPos(x, 0, z))) {
+                ventX = x;
+                ventZ = z;
+                pos = new Vec3(x + 0.5, level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z), z + 0.5);
+                return;
+            }
+        }
     }
 
     @Override
@@ -106,35 +159,53 @@ public class VolcanoDisaster extends Disaster {
 
     @Override
     public float effectRadius() {
-        return ashRadius;
+        double mountain = edifice != null ? edifice.radius : plannedRadius(intensity);
+        return (float) Math.max(ashRadius, mountain * 1.4 + 60);
     }
 
-    /** y of the first air block above the crater floor (the crater's lava lake sits here, one block below the rim). */
+    private boolean building() {
+        return edifice != null && DisasterConfig.VOLCANO_BUILD_CONE.getAsBoolean() && DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean();
+    }
+
+    /** y of the first air block above the crater floor (where the lava lake and the vent are). */
     public int ventY() {
-        return groundY + 1 + Math.max(0, coneHeight - 2);
+        return building() ? edifice.ventY() : groundY + 1;
+    }
+
+    private int craterRadius() {
+        return building() ? (int) Math.ceil(edifice.craterRadius()) : 1;
     }
 
     @Override
     protected float[] syncData() {
-        return new float[]{ventY() - (float) pos.y, plumeHeight, ashRadius, blasts, buildCone ? coneRadius : 0,
-                (float) Math.cos(windAngle), (float) Math.sin(windAngle)};
+        PyroclasticFlow f = pdc;
+        return new float[]{ventY() - (float) pos.y, plumeHeight, ashRadius, blasts,
+                building() ? (float) (edifice.radius * edifice.scale()) : 0f,
+                (float) Math.cos(windAngle), (float) Math.sin(windAngle),
+                f != null ? (float) f.radius : 0f, f != null ? (float) f.angle : 0f, f != null ? (float) f.halfWidth : 0f,
+                f != null ? 1f : 0f, building() ? edifice.scale() : 0f,
+                building() ? (float) edifice.rimHeight() : 0f, f != null ? (float) f.headHeight() : 0f};
     }
 
     // ------------------------------------------------------------------ terrain decision
 
-    /** Decides (once) whether to build a cone and re-reads the ground height; false while the area isn't loaded. */
+    /** Creates the edifice once the vent area is loaded (a disaster may start before its chunks). */
     private boolean decideTerrain() {
         if (terrainDecided) return true;
-        Boolean flat = isFlat(coneRadius);
-        if (flat == null && ++decideWait < 200) return false;
+        boolean loaded = level.isLoaded(new BlockPos(ventX, 0, ventZ));
+        if (!loaded && ++decideWait < 200) return false;
         terrainDecided = true;
-        if (level.isLoaded(new BlockPos(ventX, 0, ventZ))) {
+        if (loaded) {
             groundY = surface(ventX, ventZ) - 1;
             pos = new Vec3(ventX + 0.5, groundY + 1, ventZ + 0.5);
         }
-        buildCone = DisasterConfig.VOLCANO_BUILD_CONE.getAsBoolean() && Boolean.TRUE.equals(flat);
-        coneHeight = buildCone ? 2 + intensity : 0;  // 3 .. 7
+        edifice = new VolcanoEdifice(level, random, ventX, ventZ, groundY + 1, intensity,
+                DisasterConfig.VOLCANO_BUILD_CONE.getAsBoolean());
         return true;
+    }
+
+    private int surface(int x, int z) {
+        return level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
     }
 
     // ------------------------------------------------------------------ lifecycle
@@ -142,12 +213,7 @@ public class VolcanoDisaster extends Disaster {
     @Override
     protected void onPhaseChange(Phase from, Phase to) {
         if (to == Phase.BUILDUP) {
-            broadcast(Component.translatable("disaster.realisticdisasters.volcano.onset").withStyle(ChatFormatting.RED), ashRadius + 60);
-        }
-        if (to.ordinal() >= Phase.PEAK.ordinal() && decideTerrain()) {
-            // Skipped or short buildup: finish the cone before the eruption proper.
-            queueConeLayers(coneHeight);
-            prepareVent();
+            broadcast(Component.translatable("disaster.realisticdisasters.volcano.onset").withStyle(ChatFormatting.RED), effectRadius() + 60);
         }
     }
 
@@ -155,6 +221,7 @@ public class VolcanoDisaster extends Disaster {
     protected void onEnd() {
         bombs.clear();
         flows.clear();
+        pdc = null;
         // Everything still molten cools now (still batched through the queue).
         var queue = DisasterManager.blockQueue(level);
         while (!cooling.isEmpty()) {
@@ -163,163 +230,122 @@ public class VolcanoDisaster extends Disaster {
         }
     }
 
+    /** Growth of the mountain over the eruption: a first cone in the buildup, the bulk during the peak. */
+    private float growthTarget() {
+        float p = phaseProgress();
+        return switch (phase()) {
+            case WARNING -> 0f;
+            case BUILDUP -> 0.25f * smooth(p);
+            case PEAK -> 0.25f + 0.75f * smooth(Math.min(1f, p / 0.9f));
+            case AFTERMATH -> 1f;
+        };
+    }
+
     @Override
     protected void tickDisaster() {
         if (age() == 1) {
-            broadcast(Component.translatable("disaster.realisticdisasters.volcano.warning").withStyle(ChatFormatting.GOLD), ashRadius + 80);
+            broadcast(Component.translatable("disaster.realisticdisasters.volcano.warning").withStyle(ChatFormatting.GOLD), effectRadius() + 80);
         }
         if (age() % 20 == 0 && phase() != Phase.AFTERMATH) alertMobs();
-
-        if (phase() != Phase.WARNING && !terrainDecided) {
-            if (!decideTerrain()) return; // wait for the vent's chunks
-            if (phase() != Phase.BUILDUP) {
-                queueConeLayers(coneHeight);
-                prepareVent();
-            }
+        if (phase() == Phase.WARNING) {
+            tickFissures();
+            tickCooling();
+            return;
         }
-        if (phase() == Phase.BUILDUP) {
-            queueConeLayers(Mth.ceil(coneHeight * Math.min(1f, phaseProgress() * 1.25f)));
-            if (phaseProgress() > 0.8f) prepareVent();
+        if (!decideTerrain()) return;
+
+        float growth = growthTarget();
+        if (confine < Double.MAX_VALUE) growth = (float) Math.min(growth, confine / edifice.radius);
+        edifice.setScale(growth);
+        if (building()) {
+            edifice.tick();
+            if (age() % 4 == 0) edifice.liftEntities();
         }
 
         float s = strength();
-        boolean erupting = phase() == Phase.PEAK || phase() == Phase.BUILDUP && phaseProgress() > 0.6f
-                || phase() == Phase.AFTERMATH && phaseProgress() < 0.6f;
+        boolean erupting = phase() == Phase.PEAK || phase() == Phase.BUILDUP && phaseProgress() > 0.5f
+                || phase() == Phase.AFTERMATH && phaseProgress() < 0.5f;
         if (erupting) {
             tickBombs(s);
-            if (phase() == Phase.PEAK) {
-                tickLightning();
-                tickBlasts();
-                tickFlows();
-                if (age() % 2 == 0) scorchAround();
+            if (age() % 60 == 0) feedLavaLake();
+        }
+        if (phase() == Phase.PEAK) {
+            tickLightning();
+            tickBlasts();
+            tickFlows();
+            if (age() % 2 == 0) scorchAround();
+            meltSnow();
+            if (intensity >= 5 && !collapsed && phaseProgress() > 0.55f) {
+                collapsed = true;
+                startPyroclasticFlow(true); // the climax: the whole column collapses
             }
+        }
+        if ((phase() == Phase.PEAK || phase() == Phase.AFTERMATH && phaseProgress() < 0.5f) && DisasterConfig.VOLCANO_ASH_FALL.getAsBoolean()) {
+            AshFall.deposit(level, random, ventX + 0.5, ventZ + 0.5, windAngle, Math.min(ashRadius, confine), intensity, s, 1 + intensity / 2);
+        }
+        if (pdc != null) {
+            pdc.tick();
+            if (pdc.done()) pdc = null;
         }
         pruneBombs();
         tickCooling();
     }
 
-    // ------------------------------------------------------------------ terrain checks
+    // ------------------------------------------------------------------ precursors
 
-    /** @return whether the ground within the radius is flat, or null if part of it isn't loaded */
-    private Boolean isFlat(int radius) {
-        int min = Integer.MAX_VALUE, max = Integer.MIN_VALUE;
-        for (int dx = -radius; dx <= radius; dx += 2) {
-            for (int dz = -radius; dz <= radius; dz += 2) {
-                if (dx * dx + dz * dz > radius * radius) continue;
-                int x = ventX + dx, z = ventZ + dz;
-                if (!level.isLoaded(new BlockPos(x, 0, z))) return null;
-                int h = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-                min = Math.min(min, h);
-                max = Math.max(max, h);
-            }
-        }
-        return max - min <= 3;
-    }
-
-    private int surface(int x, int z) {
-        return level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-    }
-
-    // ------------------------------------------------------------------ cone
-
-    /** Target top height (relative to the ground) of the cone column at horizontal distance d. */
-    private int coneColumnHeight(double d) {
-        if (d > coneRadius) return 0;
-        double crater = craterRadius();
-        if (d < crater) return coneHeight - 2; // crater floor: the lava lake on it stays below the rim
-        // Rim at full height, sloping down to the ground at the cone's foot.
-        int h = (int) Math.round(coneHeight * (1 - (d - crater) / (coneRadius - crater + 0.5)) + 0.5);
-        return Mth.clamp(h, 0, coneHeight);
-    }
-
-    private double craterRadius() {
-        return 1.0 + intensity / 3.0;
-    }
-
-    private void queueConeLayers(int upTo) {
-        if (!buildCone || !DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean()) {
-            coneLayersQueued = Math.max(coneLayersQueued, upTo);
-            return;
-        }
+    /** Ground deformation: fissures tear open around the future vent and steam, glowing at the bottom. */
+    private void tickFissures() {
+        if (!DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean() || fissures >= 1 + intensity / 2) return;
+        if (age() < 120 || random.nextInt(140) != 0) return;
+        fissures++;
+        double a = random.nextDouble() * Math.PI * 2;
+        double start = 2 + random.nextDouble() * 4;
+        int length = 6 + intensity * 4;
         var queue = DisasterManager.blockQueue(level);
-        while (coneLayersQueued < upTo) {
-            int layer = ++coneLayersQueued;
-            int y = groundY + layer;
-            for (int dx = -coneRadius; dx <= coneRadius; dx++) {
-                for (int dz = -coneRadius; dz <= coneRadius; dz++) {
-                    double d = Math.sqrt(dx * dx + dz * dz);
-                    int h = coneColumnHeight(d);
-                    if (h < layer) continue;
-                    BlockPos p = new BlockPos(ventX + dx, y, ventZ + dz);
-                    boolean craterFloor = layer == h && d < craterRadius();
-                    boolean top = layer == h;
-                    long seed = random.nextLong();
-                    queue.add(l -> placeCone(p, craterFloor, top, d, seed));
+        for (int k = 0; k < length; k++) {
+            double r = start + k, wobble = (random.nextDouble() - 0.5) * 0.25;
+            int x = Mth.floor(ventX + 0.5 + Math.cos(a + wobble) * r), z = Mth.floor(ventZ + 0.5 + Math.sin(a + wobble) * r);
+            if (!level.isLoaded(new BlockPos(x, 0, z))) continue;
+            int depth = k < length / 2 ? 2 : 1;
+            queue.add(l -> {
+                int top = surface(x, z) - 1;
+                for (int d = 0; d < depth; d++) {
+                    BlockPos p = new BlockPos(x, top - d, z);
+                    BlockState st = level.getBlockState(p);
+                    if (st.hasBlockEntity() || st.getDestroySpeed(level, p) < 0 || !DisasterProtection.canModify(level, p, st)) return;
+                    level.setBlock(p, Blocks.AIR.defaultBlockState(), 3);
                 }
-            }
-        }
-    }
-
-    private void placeCone(BlockPos p, boolean craterFloor, boolean top, double d, long seed) {
-        if (isFinished()) return;
-        BlockState st = level.getBlockState(p);
-        if (!st.isAir() && !st.canBeReplaced()) return;
-        if (st.hasBlockEntity() || !DisasterProtection.canModify(level, p, st)) return;
-        var rng = net.minecraft.util.RandomSource.create(seed);
-        BlockState put;
-        if (craterFloor) {
-            put = Blocks.MAGMA_BLOCK.defaultBlockState();
-        } else if (top) {
-            float r = rng.nextFloat();
-            boolean nearCrater = d < 2.5 + intensity / 3.0;
-            put = nearCrater && r < 0.3f ? Blocks.MAGMA_BLOCK.defaultBlockState()
-                    : r < 0.5f ? Blocks.BLACKSTONE.defaultBlockState()
-                    : r < 0.75f ? Blocks.BASALT.defaultBlockState()
-                    : r < 0.9f ? Blocks.TUFF.defaultBlockState()
-                    : Blocks.COBBLED_DEEPSLATE.defaultBlockState();
-        } else {
-            put = rng.nextFloat() < 0.6f ? Blocks.TUFF.defaultBlockState() : Blocks.BLACKSTONE.defaultBlockState();
-        }
-        level.setBlock(p, put, 3);
-        coneBlocks++;
-    }
-
-    /** Opens the vent: a lava pool in the crater (or a scorched magma throat on uneven ground). */
-    private void prepareVent() {
-        if (ventPrepared) return;
-        ventPrepared = true;
-        if (!DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean()) return;
-        var queue = DisasterManager.blockQueue(level);
-        int vy = ventY();
-        if (!buildCone) {
-            // Natural slopes: melt the ground around the vent.
-            for (int dx = -1; dx <= 1; dx++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    int x = ventX + dx, z = ventZ + dz;
-                    BlockPos p = new BlockPos(x, surface(x, z) - 1, z);
-                    queue.add(l -> {
-                        BlockState st = level.getBlockState(p);
-                        float hardness = st.getDestroySpeed(level, p);
-                        if (st.isAir() || st.hasBlockEntity() || hardness < 0 || hardness > 50) return;
-                        if (!DisasterProtection.canModify(level, p, st)) return;
-                        level.setBlock(p, Blocks.MAGMA_BLOCK.defaultBlockState(), 3);
-                    });
+                BlockPos bottom = new BlockPos(x, top - depth, z);
+                BlockState st = level.getBlockState(bottom);
+                if (!st.isAir() && st.getDestroySpeed(level, bottom) >= 0 && DisasterProtection.canModify(level, bottom, st)) {
+                    level.setBlock(bottom, Blocks.MAGMA_BLOCK.defaultBlockState(), 3);
                 }
-            }
-            queue.add(l -> placeLava(new BlockPos(ventX, surface(ventX, ventZ), ventZ)));
-        } else {
-            queue.add(l -> placeLava(new BlockPos(ventX, vy, ventZ)));
+            });
         }
     }
 
-    // ------------------------------------------------------------------ bombs and blasts
+    // ------------------------------------------------------------------ crater, bombs and blasts
 
     private Vec3 ventTop() {
         return new Vec3(ventX + 0.5, ventY() + 0.6, ventZ + 0.5);
     }
 
+    /** Keeps a lava lake in the summit crater; as the mountain grows, the crater floor rises and buries the old lake. */
+    private void feedLavaLake() {
+        if (!DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean()) return;
+        int vy = ventY();
+        int cr = Math.max(0, craterRadius() - 1);
+        var queue = DisasterManager.blockQueue(level);
+        for (int dx = -cr; dx <= cr; dx++)
+            for (int dz = -cr; dz <= cr; dz++) {
+                if (dx * dx + dz * dz > cr * cr || (dx != 0 || dz != 0) && random.nextFloat() < 0.6f) continue;
+                int x = ventX + dx, z = ventZ + dz;
+                queue.add(l -> placeLava(new BlockPos(x, Math.min(vy, surface(x, z)), z)));
+            }
+    }
+
     private void tickBombs(float s) {
-        float rate = (0.03f + 0.025f * intensity) * s;
+        float rate = (0.03f + 0.03f * intensity) * s;
         if (random.nextFloat() < rate) launchBomb(1f);
     }
 
@@ -329,8 +355,9 @@ public class VolcanoDisaster extends Disaster {
         Vec3 from = ventTop();
         if (!level.isLoaded(BlockPos.containing(from))) return;
         double a = random.nextDouble() * Math.PI * 2;
-        double h = (0.12 + random.nextDouble() * 0.38) * (0.7 + intensity * 0.1) * power;
-        double v = (0.9 + random.nextDouble() * 0.6) * (0.85 + intensity * 0.05) * power;
+        double reach = (0.85 + intensity * 0.1) * Math.min(1.0, confine / 60.0);
+        double h = (0.12 + random.nextDouble() * 0.38) * reach * power;
+        double v = (0.9 + random.nextDouble() * 0.7) * reach * power;
         Vec3 vel = new Vec3(Math.cos(a) * h, v, Math.sin(a) * h);
         bombs.add(LavaBombEntity.launch(level, from.add(vel.x * 2, 0.4, vel.z * 2), vel, intensity));
         bombsLaunched++;
@@ -347,41 +374,54 @@ public class VolcanoDisaster extends Disaster {
         int burst = 2 + intensity + random.nextInt(intensity + 1);
         for (int i = 0; i < burst; i++) launchBomb(1.15f);
         Vec3 v = ventTop();
-        level.sendParticles(net.minecraft.core.particles.ParticleTypes.EXPLOSION_EMITTER, v.x, v.y + 1, v.z, 1, 0, 0, 0, 0);
-        level.sendParticles(net.minecraft.core.particles.ParticleTypes.LAVA, v.x, v.y + 0.5, v.z, 20 + intensity * 6, 1.2, 0.6, 1.2, 0);
-        // Blast wave: knock nearby entities back and singe those right at the vent.
-        double r = 6 + intensity * 2;
+        level.sendParticles(ParticleTypes.EXPLOSION_EMITTER, v.x, v.y + 1, v.z, 1, 0, 0, 0, 0);
+        level.sendParticles(ParticleTypes.LAVA, v.x, v.y + 0.5, v.z, 20 + intensity * 6, 1.2, 0.6, 1.2, 0);
+        // Pressure wave: knocks everything near the crater back and burns what is right at the vent.
+        double r = 8 + intensity * 4;
         AABB box = new AABB(v.x - r, v.y - r, v.z - r, v.x + r, v.y + r, v.z + r);
-        for (var e : level.getEntities((net.minecraft.world.entity.Entity) null, box, e -> e instanceof net.minecraft.world.entity.LivingEntity && !e.isSpectator())) {
+        for (Entity e : level.getEntities((Entity) null, box, e -> !e.isSpectator())) {
             Vec3 away = e.position().subtract(v);
             double d = away.length();
             if (d > r || d < 1.0e-3) continue;
-            double push = (1 - d / r) * (0.6 + intensity * 0.15);
+            double push = (1 - d / r) * (0.6 + intensity * 0.2);
             e.setDeltaMovement(e.getDeltaMovement().add(away.normalize().scale(push).add(0, push * 0.4, 0)));
             e.hurtMarked = true;
-            if (d < r * 0.5) {
-                ((net.minecraft.world.entity.LivingEntity) e).hurtServer(level,
-                        level.damageSources().source(com.realisticdisasters.registry.ModRegistries.VOLCANO_DAMAGE), 2f + intensity);
+            if (d < r * 0.5 && e instanceof LivingEntity le) {
+                le.hurtServer(level, level.damageSources().source(ModRegistries.VOLCANO_DAMAGE), 2f + intensity);
             }
         }
+        // Explosive eruptions can collapse part of the column into a pyroclastic flow.
+        float chance = intensity >= 5 ? 0.45f : intensity == 4 ? 0.3f : intensity == 3 ? 0.12f : 0f;
+        if (pdc == null && random.nextFloat() < chance) startPyroclasticFlow(false);
+    }
+
+    private void startPyroclasticFlow(boolean fullCollapse) {
+        if (pdc != null && !fullCollapse || !DisasterConfig.VOLCANO_PYROCLASTIC_FLOWS.getAsBoolean()) return;
+        double mountain = edifice != null ? edifice.radius * Math.max(0.3f, edifice.scale()) : 10;
+        double maxR = Math.min(confine, mountain * 1.2 + 40 + intensity * 15);
+        double halfWidth = fullCollapse ? Math.PI : 0.45 + random.nextDouble() * 0.6;
+        pdc = new PyroclasticFlow(level, random, intensity, ventX, ventZ, craterRadius() + 1, maxR,
+                random.nextDouble() * Math.PI * 2, halfWidth, ventY());
+        pdcCount++;
+        broadcast(Component.translatable("disaster.realisticdisasters.volcano.pyroclastic").withStyle(ChatFormatting.DARK_RED), maxR + 80);
     }
 
     // ------------------------------------------------------------------ volcanic lightning
 
     /**
      * Ash particles colliding in the column charge it like a thunderstorm ("dirty thunderstorm"): frequent bolts
-     * near the vent. Visual only (no fire); vanilla handles the flash and thunder.
+     * around the vent. Visual only (no fire); vanilla handles the flash and thunder.
      */
     private void tickLightning() {
         if (!DisasterConfig.VOLCANO_LIGHTNING.getAsBoolean() || intensity < 2) return;
         if (random.nextInt(Math.max(30, 230 - intensity * 40)) != 0) return;
         double a = random.nextDouble() * Math.PI * 2;
-        double d = coneRadius * 0.6 + random.nextDouble() * (8 + intensity * 4);
+        double d = craterRadius() + 2 + random.nextDouble() * (8 + intensity * 6);
         double x = ventX + 0.5 + Math.cos(a) * d + Math.cos(windAngle) * random.nextDouble() * 10;
         double z = ventZ + 0.5 + Math.sin(a) * d + Math.sin(windAngle) * random.nextDouble() * 10;
         BlockPos col = BlockPos.containing(x, 0, z);
         if (!level.isLoaded(col)) return;
-        var bolt = net.minecraft.world.entity.EntityType.LIGHTNING_BOLT.create(level, net.minecraft.world.entity.EntitySpawnReason.EVENT);
+        var bolt = EntityType.LIGHTNING_BOLT.create(level, EntitySpawnReason.EVENT);
         if (bolt == null) return;
         bolt.setVisualOnly(true);
         bolt.snapTo(x, level.getHeight(Heightmap.Types.MOTION_BLOCKING, col.getX(), col.getZ()), z);
@@ -391,23 +431,23 @@ public class VolcanoDisaster extends Disaster {
 
     // ------------------------------------------------------------------ lava flows
 
+    /** Lava overflows the crater rim and runs down the flanks as rivers that braid and spread into lobes. */
     private void tickFlows() {
         if (!DisasterConfig.VOLCANO_LAVA_FLOWS.getAsBoolean() || !DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean()) return;
         int maxHeads = 1 + intensity / 2;
-        if (flows.size() < maxHeads && lavaPlaced < maxLava && (flowsStarted == 0 || random.nextInt(120) == 0)) {
-            // Like real cinder cones, flows break out at the foot of the cone instead of pouring over the rim.
-            int fx = ventX, fz = ventZ;
-            if (buildCone) {
-                double a = random.nextDouble() * Math.PI * 2;
-                fx = Mth.floor(ventX + 0.5 + Math.cos(a) * (coneRadius + 1));
-                fz = Mth.floor(ventZ + 0.5 + Math.sin(a) * (coneRadius + 1));
+        if (flows.size() < maxHeads && lavaPlaced < maxLava && (flowsStarted == 0 || random.nextInt(100) == 0)) {
+            double a = random.nextDouble() * Math.PI * 2;
+            double r = craterRadius() + 1;
+            int fx = Mth.floor(ventX + 0.5 + Math.cos(a) * r), fz = Mth.floor(ventZ + 0.5 + Math.sin(a) * r);
+            if (level.isLoaded(new BlockPos(fx, 0, fz))) {
                 BlockPos breach = new BlockPos(fx, surface(fx, fz), fz);
                 DisasterManager.blockQueue(level).add(l -> placeLava(breach));
+                double mountain = edifice != null ? edifice.radius * edifice.scale() : 10;
+                flows.add(new FlowHead(fx, fz, (int) Math.min(confine, mountain * 1.3 + 12 + intensity * 6)));
+                flowsStarted++;
             }
-            flows.add(new FlowHead(fx, fz, 10 + intensity * 6));
-            flowsStarted++;
         }
-        int interval = Math.max(3, 8 - intensity);
+        int interval = Math.max(2, 7 - intensity);
         if (age() % interval != 0) return;
         var queue = DisasterManager.blockQueue(level);
         var it = flows.iterator();
@@ -524,17 +564,18 @@ public class VolcanoDisaster extends Disaster {
         rockFormed++;
     }
 
-    // ------------------------------------------------------------------ heat damage around the vent
+    // ------------------------------------------------------------------ heat around the mountain
 
     /**
-     * Tephra apron: scoria and ash rain down thickest at the foot of the cone, so samples concentrate there. Near the
-     * cone this builds a continuous black scoria blanket; farther out it thins into scorched, ash-covered soil.
+     * Tephra apron: scoria rains down thickest at the foot of the cone, so samples concentrate there. Near the cone
+     * this builds a continuous black scoria blanket; farther out it thins into scorched ground.
      */
     private void scorchAround() {
         if (!DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean()) return;
         double a = random.nextDouble() * Math.PI * 2;
-        double apron = 2 + intensity;
-        double rr = (buildCone ? coneRadius : 2) + Math.abs(random.nextGaussian()) * apron;
+        double foot = building() ? edifice.radius * edifice.scale() : 2;
+        double apron = 3 + intensity * 2;
+        double rr = foot + Math.abs(random.nextGaussian()) * apron;
         int x = Mth.floor(ventX + 0.5 + Math.cos(a) * rr), z = Mth.floor(ventZ + 0.5 + Math.sin(a) * rr);
         if (!level.isLoaded(new BlockPos(x, 0, z))) return;
         BlockPos p = new BlockPos(x, level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1, z);
@@ -544,23 +585,47 @@ public class VolcanoDisaster extends Disaster {
             if (!DisasterProtection.canModify(level, p, st)) return;
             boolean soil = st.is(Blocks.GRASS_BLOCK) || st.is(Blocks.PODZOL) || st.is(Blocks.MYCELIUM)
                     || st.is(Blocks.DIRT) || st.is(Blocks.COARSE_DIRT);
-            double d = Math.sqrt((p.getX() - ventX) * (p.getX() - ventX) + (p.getZ() - ventZ) * (p.getZ() - ventZ));
-            if (soil && d < (buildCone ? coneRadius : 2) + apron) {
+            double d = Math.hypot(p.getX() - ventX, p.getZ() - ventZ);
+            if (soil && d < foot + apron * 0.6) {
                 level.setBlock(p, level.getRandom().nextFloat() < 0.8f ? Blocks.BLACKSTONE.defaultBlockState()
                         : Blocks.TUFF.defaultBlockState(), 3);
             } else if (soil && !st.is(Blocks.COARSE_DIRT)) {
                 level.setBlock(p, Blocks.COARSE_DIRT.defaultBlockState(), 3);
-            } else if (st.canBeReplaced() && !st.isAir() && !(st.getBlock() instanceof LiquidBlock) || st.is(BlockTags.SNOW)) {
+            } else if (st.canBeReplaced() && !st.isAir() && !(st.getBlock() instanceof LiquidBlock) && !st.is(ModRegistries.VOLCANIC_ASH.get())) {
                 level.destroyBlock(p, false);
             }
         });
     }
 
+    /** Heat and ash melt snow and ice on and around the mountain; the meltwater runs off downhill (lahars). */
+    private void meltSnow() {
+        if (!DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean()) return;
+        double range = (edifice != null ? edifice.radius : 10) * 1.3 + 20;
+        var queue = DisasterManager.blockQueue(level);
+        for (int k = 0; k < 2 + intensity; k++) {
+            double a = random.nextDouble() * Math.PI * 2, r = Math.sqrt(random.nextDouble()) * range;
+            int x = Mth.floor(ventX + 0.5 + Math.cos(a) * r), z = Mth.floor(ventZ + 0.5 + Math.sin(a) * r);
+            if (!level.isLoaded(new BlockPos(x, 0, z))) continue;
+            BlockPos p = new BlockPos(x, level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1, z);
+            BlockState st = level.getBlockState(p);
+            if (!(st.is(BlockTags.SNOW) || st.is(Blocks.ICE) || st.is(Blocks.PACKED_ICE))) continue;
+            boolean water = random.nextFloat() < 0.4f;
+            queue.add(l -> {
+                BlockState now = level.getBlockState(p);
+                if (!(now.is(BlockTags.SNOW) || now.is(Blocks.ICE) || now.is(Blocks.PACKED_ICE))) return;
+                if (!DisasterProtection.canModify(level, p, now)) return;
+                boolean layer = now.is(Blocks.SNOW);
+                level.setBlock(p, !layer && water ? Blocks.WATER.defaultBlockState() : Blocks.AIR.defaultBlockState(), 3);
+            });
+        }
+    }
+
     // ------------------------------------------------------------------ mob reactions
 
     private void alertMobs() {
-        double r = coneRadius + 30 + intensity * 10 + (phase() == Phase.WARNING ? 30 : 0);
-        AABB box = new AABB(pos.x - r, pos.y - 24, pos.z - r, pos.x + r, pos.y + 40, pos.z + r);
+        double mountain = edifice != null ? edifice.radius : plannedRadius(intensity);
+        double r = mountain + 30 + intensity * 10 + (phase() == Phase.WARNING ? 30 : 0);
+        AABB box = new AABB(pos.x - r, pos.y - 24, pos.z - r, pos.x + r, pos.y + 60, pos.z + r);
         for (PathfinderMob mob : level.getEntitiesOfClass(PathfinderMob.class, box, m -> !(m instanceof Enemy))) {
             if (mob instanceof Villager villager) {
                 villager.getBrain().setMemory(MemoryModuleType.HEARD_BELL_TIME, level.getGameTime());
@@ -587,7 +652,22 @@ public class VolcanoDisaster extends Disaster {
     public int lavaCooled() { return lavaCooled; }
     public int rockFormed() { return rockFormed; }
     public int lightningStrikes() { return lightning; }
-    public int coneBlocks() { return coneBlocks; }
-    public boolean hasCone() { return buildCone; }
+    public int coneBlocks() { return edifice != null ? edifice.placedBlocks() : 0; }
+    public boolean hasCone() { return building(); }
     public int blasts() { return blasts; }
+    public int pyroclasticFlows() { return pdcCount; }
+    public int mountainHeight() { return edifice != null ? edifice.height : 0; }
+    public int mountainRadius() { return edifice != null ? edifice.radius : 0; }
+    public float growth() { return edifice != null ? edifice.scale() : 0f; }
+    public BlockPos ventPos() { return new BlockPos(ventX, ventY(), ventZ); }
+
+    /** Test hook: keep the mountain, flows, ash fall and bombs within {@code radius} blocks of the vent. */
+    public void confineForTest(double radius) {
+        confine = radius;
+    }
+
+    /** Test hook: start a pyroclastic flow now. */
+    public void triggerPyroclasticFlow() {
+        if (decideTerrain()) startPyroclasticFlow(false);
+    }
 }

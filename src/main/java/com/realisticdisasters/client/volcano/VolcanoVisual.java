@@ -4,9 +4,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.realisticdisasters.client.ClientDisaster;
+import com.realisticdisasters.client.ClientDisasters;
 import com.realisticdisasters.client.DisasterVisual;
 import com.realisticdisasters.client.sound.DisasterLoopSound;
 import com.realisticdisasters.config.ClientConfig;
+import com.realisticdisasters.disaster.DisasterType;
 import com.realisticdisasters.disaster.Phase;
 import com.realisticdisasters.disaster.volcano.LavaBombEntity;
 import com.realisticdisasters.disaster.volcano.VolcanoDisaster;
@@ -14,9 +16,11 @@ import com.realisticdisasters.registry.ModRegistries;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.resources.sounds.AbstractTickableSoundInstance;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.client.resources.sounds.SoundInstance;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ParticleStatus;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
@@ -26,22 +30,13 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.attribute.EnvironmentAttributes;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.Heightmap;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Volcano presentation, modelled on real eruption footage (Kīlauea fountains, Strombolian/Vulcanian bursts,
- * Sakurajima / Taal ash columns):
- * <ul>
- *   <li>an eruption column that is a narrow, dark, fast jet at the vent and widens with height as it entrains air,
- *   built from rising, swelling, churning billows with dark undersides and lighter sunlit crowns;</li>
- *   <li>an umbrella cloud spreading at neutral buoyancy and drifting far downwind, with grey fall-out curtains
- *   hanging beneath it;</li>
- *   <li>an incandescent lava fountain whose spatter cools from yellow to red to black in flight, lighting the base of
- *   the column orange;</li>
- *   <li>blasts that throw dark ash jets and a shower of glowing ejecta, with sound arriving after the flash;</li>
- *   <li>glowing spark arcs behind lava bombs, fumes rising off fresh lava flows, falling ash, a dim brown-grey sky.</li>
- * </ul>
+ * Volcano presentation. The big clouds (eruption column, umbrella cloud, fall-out, pyroclastic flows, steam and smoke
+ * puffs) are volumetric voxel clouds rendered like Minecraft's own clouds ({@link VoxelCloud}); incandescent spatter
+ * and fine ash fall are particles. Plus the ash-darkened sky, distance-scaled tremor and blast jolts, and layered sound
+ * where blasts arrive after the flash with the speed of sound.
  */
 public final class VolcanoVisual implements DisasterVisual {
     private static final int SKY = 0x6A5F55;     // ash-dimmed daylight: warm brown-grey
@@ -51,8 +46,10 @@ public final class VolcanoVisual implements DisasterVisual {
 
     private static final RandomSource RANDOM = RandomSource.create();
 
-    private static final class State {
+    static final class State {
+        VoxelCloud cloud;
         DisasterLoopSound rumble, distant;
+        FrontSound pdcSound;
         int nextRumble = 30;
         int lastBlasts = -1;
         float blastShake;
@@ -86,7 +83,7 @@ public final class VolcanoVisual implements DisasterVisual {
             case WARNING -> 0f;
             case BUILDUP -> Mth.clamp((d.phaseProgress - 0.3f) / 0.7f, 0f, 1f);
             case PEAK -> 1f;
-            case AFTERMATH -> 1f - Mth.clamp(d.phaseProgress * 1.3f, 0f, 1f);
+            case AFTERMATH -> 1f - Mth.clamp(d.phaseProgress * 1.2f, 0f, 1f);
         };
     }
 
@@ -95,19 +92,22 @@ public final class VolcanoVisual implements DisasterVisual {
         return d.pos().add(wind(d).scale(ashRadius(d) * 0.35));
     }
 
-    /** Column geometry: radius at height h above the vent (jet + ~8° entrainment spread). */
-    private static double columnRadius(int intensity, double h) {
-        return 1.5 + intensity * 0.5 + 0.2 * h;
+    private static boolean pdcActive(ClientDisaster d) {
+        return d.data.length > VolcanoDisaster.D_PDC_HEAD && d.data[VolcanoDisaster.D_PDC_ON] > 0.5f;
     }
 
-    /** Horizontal offset of the column axis at height h: it bends over in the wind, more strongly aloft. */
-    private static Vec3 lean(Vec3 wind, double h, double height) {
-        return wind.scale(0.35 * h * h / height);
-    }
-
-    /** Ambient wind speed at height h (stronger aloft). */
-    private static double windSpeed(double h, double height) {
-        return 0.03 + 0.14 * Mth.clamp(h / height, 0, 1.2);
+    /** The point of the pyroclastic flow's front (or body) nearest to the camera. */
+    private static Vec3 nearestFront(ClientDisaster d, Vec3 cam) {
+        double rf = d.data[VolcanoDisaster.D_PDC_RADIUS], a0 = d.data[VolcanoDisaster.D_PDC_ANGLE];
+        double half = d.data[VolcanoDisaster.D_PDC_WIDTH];
+        Vec3 o = d.pos();
+        double a = Math.atan2(cam.z - o.z, cam.x - o.x);
+        double diff = Mth.wrapDegrees((float) Math.toDegrees(a - a0));
+        double lim = Math.toDegrees(half);
+        double clamped = Math.toRadians(Mth.clamp(diff, -lim, lim)) + a0;
+        double rCam = Math.hypot(cam.x - o.x, cam.z - o.z);
+        double r = Math.min(rf, rCam);
+        return new Vec3(o.x + Math.cos(clamped) * r, cam.y, o.z + Math.sin(clamped) * r);
     }
 
     // ------------------------------------------------------------------ atmosphere
@@ -120,28 +120,36 @@ public final class VolcanoVisual implements DisasterVisual {
         float under = 1f - smoothstep(ashR * 0.55f, ashR * 1.35f, (float) ashDist);
         // The ash cloud keeps hanging around a while after the eruption weakens.
         float ash = Math.max(s, column(d) * 0.8f) * under;
-
         // Ash only dims what light there is: scale the tint with daylight so nights stay dark.
         float day = daylight();
         out.sky(scaled(SKY, day), ash);
         out.clouds(scaled(CLOUDS, day), ash);
         out.fogColor(scaled(FOG, day), ash);
         out.darken(ash * (0.3f + d.intensity * 0.08f));
-        float fogEnd = 40f + (5 - d.intensity) * 18f + (float) ashDist * 0.3f;
-        out.fog(fogEnd, ash * (d.phase == Phase.WARNING ? 0.3f : 0.75f));
+        // Ash fall cuts visibility, but a looming mountain stays visible through it.
+        float fogEnd = 110f + (5 - d.intensity) * 25f + (float) ashDist * 0.3f;
+        out.fog(fogEnd, ash * (d.phase == Phase.WARNING ? 0.25f : 0.6f));
 
         double dist = horizontal(d.pos(), cam);
         float i5 = d.intensity / 5f;
-        float near = 1f - smoothstep(6f, 50f + d.intensity * 12f, (float) dist);
-        float far = 1f - smoothstep(50f, 260f, (float) dist);
+        float size = 50f + d.intensity * 12f + d.data(VolcanoDisaster.D_CONE_RADIUS);
+        float near = 1f - smoothstep(6f, size, (float) dist);
+        float far = 1f - smoothstep(size, size * 4f + 100f, (float) dist);
         float blast = d.visualState instanceof State st ? st.blastShake : 0f;
-        // Constant volcanic tremor (also during the warning) plus jolts from each blast.
-        out.shake(s * i5 * (near * 0.45f + far * 0.1f) + blast);
-        out.fovPulse(Math.min(1f, blast * 1.2f) * near);
+        float pdc = 0f;
+        if (pdcActive(d)) {
+            double df = horizontal(nearestFront(d, cam), cam);
+            pdc = (1f - smoothstep(10f, 160f, (float) df)) * (0.4f + i5 * 0.6f);
+            // Engulfed: the ash cloud swallows the light.
+            if (df < 12) out.fog(6f, 1f - (float) df / 12f);
+        }
+        // Constant volcanic tremor (also during the warning) plus jolts from blasts and the roaring flow.
+        out.shake(s * i5 * (near * 0.45f + far * 0.12f) + blast + pdc * 0.7f);
+        out.fovPulse(Math.min(1f, blast * 1.2f + pdc) * Math.max(near, pdc));
     }
 
     /** 0..1 from the dimension's current sky light (vanilla day/night cycle and weather). */
-    private static float daylight() {
+    static float daylight() {
         var level = Minecraft.getInstance().level;
         if (level == null) return 1f;
         float sky = level.environmentAttributes().getDimensionValue(EnvironmentAttributes.SKY_LIGHT_LEVEL);
@@ -159,10 +167,12 @@ public final class VolcanoVisual implements DisasterVisual {
     public void tick(ClientDisaster d, ClientLevel level, Camera camera) {
         State st = d.visualState instanceof State s ? s : new State();
         d.visualState = st;
+        if (st.cloud == null) st.cloud = new VoxelCloud(d.intensity, d.id * 31L + 7);
         Vec3 cam = camera.position();
         tickBlasts(d, st, level, cam);
         tickSounds(d, st, cam);
-        spawnParticles(d, level, camera, cam);
+        spawnEffects(d, st, level, cam);
+        st.cloud.tick(d, level, daylight());
     }
 
     static float density() {
@@ -175,18 +185,6 @@ public final class VolcanoVisual implements DisasterVisual {
         };
     }
 
-    private static boolean ready() {
-        return AshParticle.cloudSprites != null && AshParticle.curtainSprites != null && SparkParticle.sprites != null;
-    }
-
-    private static AshParticle ash(ClientLevel level, AshParticle.Kind kind, double x, double y, double z,
-                                   double xd, double yd, double zd) {
-        var sprites = kind == AshParticle.Kind.CURTAIN ? AshParticle.curtainSprites : AshParticle.cloudSprites;
-        AshParticle p = new AshParticle(level, x, y, z, xd, yd, zd, kind, sprites);
-        Minecraft.getInstance().particleEngine.add(p);
-        return p;
-    }
-
     private static SparkParticle spark(ClientLevel level, double x, double y, double z, double xd, double yd, double zd,
                                        float size, float heat, int life) {
         SparkParticle p = new SparkParticle(level, x, y, z, xd, yd, zd, size, heat, life, SparkParticle.sprites);
@@ -194,158 +192,85 @@ public final class VolcanoVisual implements DisasterVisual {
         return p;
     }
 
-    private void spawnParticles(ClientDisaster d, ClientLevel level, Camera camera, Vec3 cam) {
+    private void spawnEffects(ClientDisaster d, State st, ClientLevel level, Vec3 cam) {
         float density = density();
-        if (density <= 0 || !ready()) return;
-
         Vec3 vent = vent(d);
         Vec3 wind = wind(d);
-        Vec3 side = new Vec3(-wind.z, 0, wind.x);
         float col = column(d);
         float s = d.strength();
         int i = d.intensity;
-        double height = plumeHeight(d) * (0.3f + 0.7f * col);
         double dist = horizontal(d.pos(), cam);
         float lod = dist < 128 ? 1f : dist < 256 ? 0.65f : dist < 420 ? 0.4f : 0.2f;
-        double spread = height * 0.6;
-        AABB box = new AABB(vent.x - spread, vent.y - 4, vent.z - spread, vent.x + spread, vent.y + height + 16, vent.z + spread)
-                .expandTowards(wind.scale(height));
-        boolean visible = camera.getCullFrustum() == null || camera.getCullFrustum().isVisible(box);
-        if (!visible) lod *= 0.1f;
-        // Sized for vanilla's shared particle queue (16384): roughly 5-7k live puffs at intensity 3-4.
-        float budget = (5 + i * 3) * density * lod;
-        // Far away, fewer but larger sparks keep the fountain readable.
-        float sparkScale = (float) Math.max(1.0, dist / 70.0);
+        VoxelCloud cloud = st.cloud;
 
-        // Warning: pale gas and steam from the vent.
-        if (d.phase == Phase.WARNING || col < 0.05f) {
-            if (dist < 260 && RANDOM.nextFloat() < (0.5f + 2f * s) * density * lod) {
-                ash(level, AshParticle.Kind.STEAM, vent.x + RANDOM.nextGaussian() * 0.8, vent.y + 0.3,
-                        vent.z + RANDOM.nextGaussian() * 0.8, 0, 0.06 + RANDOM.nextDouble() * 0.05, 0)
-                        .wind(wind.x * 0.05, wind.z * 0.05).size(1.2f + RANDOM.nextFloat() * 1.5f, 3f);
-            }
-            if (col < 0.05f) {
-                spawnFlowFumes(d, level, vent, wind, dist, density, lod);
-                return;
-            }
+        // Warning: white steam and gas from the vent and the opening fissures.
+        if (d.phase == Phase.WARNING && RANDOM.nextFloat() < 0.15f + s) {
+            cloud.puff(vent.x + RANDOM.nextGaussian() * 2, vent.y, vent.z + RANDOM.nextGaussian() * 2,
+                    wind.x * 0.02, 0.15 + RANDOM.nextDouble() * 0.1, wind.z * 0.02,
+                    1f + RANDOM.nextFloat(), 0.03f, 60 + RANDOM.nextInt(40), 0.85f, 0.85f, 0.86f, 0f);
         }
 
-        // ---- eruption column: rising, swelling billows along a bending axis
-        double jetSpeed = 0.5 + i * 0.1;
-        int stem = count(budget * 1.4f * col);
-        for (int n = 0; n < stem; n++) {
-            double h = height * 0.85 * Math.pow(RANDOM.nextDouble(), 0.9);
-            double hf = h / height;
-            double rad = columnRadius(i, h);
-            Vec3 axis = vent.add(lean(wind, h, height));
-            double a = RANDOM.nextDouble() * Math.PI * 2, rr = Math.sqrt(RANDOM.nextDouble()) * rad * 0.55;
-            // dark, dense base; lighter sunlit crown higher up
-            float shade = (float) (0.2 + 0.5 * Math.pow(hf, 0.8)) * (0.85f + RANDOM.nextFloat() * 0.3f);
-            double up = jetSpeed * (1 - 0.75 * hf);
-            double ws = windSpeed(h, height);
-            ash(level, AshParticle.Kind.PLUME, axis.x + Math.cos(a) * rr, axis.y + 1 + h, axis.z + Math.sin(a) * rr,
-                    Math.cos(a) * 0.02, up, Math.sin(a) * 0.02)
-                    .updraft(up).wind(wind.x * ws, wind.z * ws)
-                    .size((float) Math.min(24, rad * (0.9 + RANDOM.nextDouble() * 0.5)), 1.7f)
-                    .tint(shade, shade * 0.92f, shade * 0.84f);
-        }
-
-        // ---- umbrella cloud at neutral buoyancy, drifting downwind
-        int cap = count(budget * 0.4f * col);
-        double top = height * 0.85;
-        Vec3 capCenter = vent.add(lean(wind, top, height));
-        for (int n = 0; n < cap; n++) {
-            double a = RANDOM.nextDouble() * Math.PI * 2;
-            double r = Math.sqrt(RANDOM.nextDouble()) * height * 0.22;
-            double y = vent.y + top + (RANDOM.nextDouble() - 0.4) * height * 0.12;
-            double out = 0.06 + RANDOM.nextDouble() * 0.1;
-            double ws = windSpeed(top, height);
-            float shade = 0.42f + RANDOM.nextFloat() * 0.16f;
-            ash(level, AshParticle.Kind.UMBRELLA, capCenter.x + Math.cos(a) * r, y, capCenter.z + Math.sin(a) * r,
-                    Math.cos(a) * out + wind.x * ws, 0, Math.sin(a) * out + wind.z * ws)
-                    .updraft(0.004).wind(wind.x * ws, wind.z * ws)
-                    .size((float) Math.min(22, height * 0.09 + RANDOM.nextFloat() * 6), 2.3f)
-                    .tint(shade, shade * 0.93f, shade * 0.87f);
-        }
-
-        // ---- fall-out curtains hanging under the drifting cloud (seen from afar as grey streaks)
-        if (d.phase != Phase.BUILDUP && i >= 2) {
-            int curtains = count(budget * 0.05f * col);
-            for (int n = 0; n < curtains; n++) {
-                double along = height * (0.25 + RANDOM.nextDouble() * 0.9);
-                double across = (RANDOM.nextDouble() - 0.5) * height * 0.35;
-                Vec3 at = capCenter.add(wind.scale(along)).add(side.scale(across));
-                double y = vent.y + RANDOM.nextDouble() * top * 0.75;
-                float shade = 0.3f + RANDOM.nextFloat() * 0.1f;
-                ash(level, AshParticle.Kind.CURTAIN, at.x, y, at.z, 0, -0.1, 0)
-                        .wind(wind.x * 0.06, wind.z * 0.06)
-                        .size((float) (height * 0.12 + RANDOM.nextFloat() * 8), 1.15f)
-                        .tint(shade, shade * 0.94f, shade * 0.88f).opacity(0.18f + RANDOM.nextFloat() * 0.12f);
-            }
-        }
-
-        if (dist < 520) {
+        if (SparkParticle.sprites != null && density > 0 && dist < 520 && col > 0.05f) {
             float erupt = s * (d.phase == Phase.PEAK ? 1f : 0.45f);
-            // ---- base of the column lit orange by the fountain
-            // Lava light on the column only stands out in the dark; by day it is confined to just above the fountain.
-            float night = 1f - daylight();
-            int glow = count(budget * (0.2f + 0.3f * night) * erupt);
-            for (int n = 0; n < glow; n++) {
-                double h = Math.pow(RANDOM.nextDouble(), 1.5) * Math.min(height * (0.08 + 0.14 * night), 10 + i * 6);
-                double rad = columnRadius(i, h);
-                double a = RANDOM.nextDouble() * Math.PI * 2, rr = Math.sqrt(RANDOM.nextDouble()) * rad * 0.5;
-                double up = jetSpeed * 0.8;
-                float k = 0.75f + RANDOM.nextFloat() * 0.25f;
-                ash(level, AshParticle.Kind.GLOW, vent.x + Math.cos(a) * rr, vent.y + 0.5 + h, vent.z + Math.sin(a) * rr, 0, up, 0)
-                        .updraft(up).wind(wind.x * 0.03, wind.z * 0.03)
-                        .size((float) (rad * (0.7 + RANDOM.nextDouble() * 0.4)), 1.6f)
-                        .tint(0.95f * k, 0.42f * k, 0.14f * k).opacity(0.8f);
-            }
-
-            // ---- incandescent lava fountain (Hawaiian / Strombolian jet of spatter)
-            double fountainH = (5 + i * 5) * erupt;
+            // Incandescent lava fountain: a dense jet of spatter; far away fewer but larger clots stay readable.
+            float sparkScale = (float) Math.max(1.0, dist / 70.0);
+            double fountainH = (5 + i * 6) * erupt;
             if (fountainH > 1) {
                 double v0 = Math.sqrt(2 * 0.04 * fountainH);
-                // A dense, continuous jet: big glowing clots in the core, fine spray around it.
                 int sparks = count((10 + i * 8) * erupt * density * lod / Math.min(sparkScale, 3f));
                 for (int n = 0; n < sparks; n++) {
                     boolean core = RANDOM.nextFloat() < 0.45f;
                     double vy = v0 * (core ? 0.75 + RANDOM.nextDouble() * 0.3 : 0.45 + RANDOM.nextDouble() * 0.55);
                     double jet = core ? 0.05 : 0.13;
-                    double sx = RANDOM.nextGaussian() * v0 * jet, sz = RANDOM.nextGaussian() * v0 * jet;
                     float size = (core ? 0.5f + RANDOM.nextFloat() * 0.6f : 0.12f + RANDOM.nextFloat() * 0.25f) * sparkScale;
                     spark(level, vent.x + RANDOM.nextGaussian() * 0.4, vent.y + 0.2, vent.z + RANDOM.nextGaussian() * 0.4,
-                            sx, vy, sz, size, 0.9f + RANDOM.nextFloat() * 0.1f, (int) (2 * vy / 0.04) + 10)
+                            RANDOM.nextGaussian() * v0 * jet, vy, RANDOM.nextGaussian() * v0 * jet,
+                            size, 0.9f + RANDOM.nextFloat() * 0.1f, (int) (2 * vy / 0.04) + 10)
                             .coolingScale(core ? 0.45f : 0.7f);
                 }
             }
         }
 
-        spawnFlowFumes(d, level, vent, wind, dist, density, lod);
+        if (dist < 260) spawnFumes(d, cloud, level, wind, density, lod);
         spawnAshFall(d, level, cam, wind, col, density);
     }
 
-    /** Gas and steam rising off fresh lava flows; an occasional glowing pop. Samples the ground around the vent. */
-    private static void spawnFlowFumes(ClientDisaster d, ClientLevel level, Vec3 vent, Vec3 wind, double dist,
-                                       float density, float lod) {
-        if (dist > 200) return;
-        int samples = count((6 + d.intensity * 3) * density * lod);
-        double range = 12 + d.intensity * 8;
+    /**
+     * Gas off fresh lava and glowing crust, and big white steam clouds where lava meets water (littoral plumes).
+     * Samples the ground around the vent and along the flows.
+     */
+    private static void spawnFumes(ClientDisaster d, VoxelCloud cloud, ClientLevel level, Vec3 wind, float density, float lod) {
+        int samples = count((8 + d.intensity * 4) * Math.max(0.3f, density) * lod);
+        double range = 14 + d.intensity * 10 + d.data(VolcanoDisaster.D_CONE_RADIUS) * 1.3;
+        Vec3 base = d.pos();
         for (int n = 0; n < samples; n++) {
-            int x = Mth.floor(vent.x + (RANDOM.nextDouble() - 0.5) * 2 * range);
-            int z = Mth.floor(vent.z + (RANDOM.nextDouble() - 0.5) * 2 * range);
+            int x = Mth.floor(base.x + (RANDOM.nextDouble() - 0.5) * 2 * range);
+            int z = Mth.floor(base.z + (RANDOM.nextDouble() - 0.5) * 2 * range);
             int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z) - 1;
             BlockPos p = new BlockPos(x, y, z);
             boolean lava = level.getFluidState(p).is(FluidTags.LAVA);
             boolean crust = !lava && level.getBlockState(p).is(Blocks.MAGMA_BLOCK);
             if (!lava && !crust) continue;
-            if (RANDOM.nextFloat() < (lava ? 0.6f : 0.25f)) {
-                float shade = 0.62f + RANDOM.nextFloat() * 0.2f;
-                ash(level, AshParticle.Kind.STEAM, x + RANDOM.nextDouble(), y + 1.1, z + RANDOM.nextDouble(), 0, 0.04, 0)
-                        .wind(wind.x * 0.04, wind.z * 0.04).tint(shade, shade * 0.97f, shade * 0.95f)
-                        .opacity(lava ? 0.32f : 0.18f);
+            boolean water = false;
+            if (lava) {
+                for (Direction dir : Direction.Plane.HORIZONTAL) {
+                    if (level.getFluidState(p.relative(dir)).is(FluidTags.WATER)) {
+                        water = true;
+                        break;
+                    }
+                }
             }
-            if (lava && RANDOM.nextFloat() < 0.15f) {
+            if (water) {
+                // Lava entering water: a violent, billowing white steam plume.
+                cloud.puff(x + 0.5, y + 1.2, z + 0.5, wind.x * 0.03, 0.35 + RANDOM.nextDouble() * 0.2, wind.z * 0.03,
+                        2f + RANDOM.nextFloat() * 2f, 0.06f, 70 + RANDOM.nextInt(40), 0.93f, 0.93f, 0.95f, 0f);
+            } else if (RANDOM.nextFloat() < (lava ? 0.5f : 0.2f)) {
+                float shade = lava ? 0.78f : 0.7f;
+                cloud.puff(x + RANDOM.nextDouble(), y + 1.1, z + RANDOM.nextDouble(), wind.x * 0.02, 0.08, wind.z * 0.02,
+                        0.6f + RANDOM.nextFloat() * 0.8f, 0.025f, 40 + RANDOM.nextInt(30), shade, shade * 0.98f, shade * 0.96f,
+                        lava ? 0.25f : 0.1f);
+            }
+            if (lava && SparkParticle.sprites != null && RANDOM.nextFloat() < 0.15f * density) {
                 spark(level, x + RANDOM.nextDouble(), y + 1.0, z + RANDOM.nextDouble(),
                         RANDOM.nextGaussian() * 0.03, 0.12 + RANDOM.nextDouble() * 0.12, RANDOM.nextGaussian() * 0.03,
                         0.1f + RANDOM.nextFloat() * 0.12f, 0.8f, 15 + RANDOM.nextInt(15));
@@ -355,6 +280,7 @@ public final class VolcanoVisual implements DisasterVisual {
 
     /** Fine ash drifting down around the viewer under the ash cloud (only where it can reach: open sky). */
     private static void spawnAshFall(ClientDisaster d, ClientLevel level, Vec3 cam, Vec3 wind, float col, float density) {
+        if (density <= 0) return;
         float ashR = ashRadius(d);
         double ashDist = horizontal(ashCenter(d), cam);
         float under = (1f - smoothstep(ashR * 0.5f, ashR * 1.2f, (float) ashDist)) * Math.max(d.strength(), col * 0.8f);
@@ -369,56 +295,73 @@ public final class VolcanoVisual implements DisasterVisual {
         }
     }
 
-    /** Glowing spark arc and thin smoke behind a flying lava bomb (called from the bomb's client tick). */
+    /** Glowing spark arc and a smoke trail behind a flying lava bomb (called from the bomb's client tick). */
     public static void bombTrail(LavaBombEntity bomb) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null || !ready()) return;
+        if (mc.level == null) return;
         float density = density();
-        if (density <= 0) return;
         double dist = mc.gameRenderer.getMainCamera().position().distanceTo(bomb.position());
         float lod = dist < 64 ? 1f : dist < 160 ? 0.6f : 0.3f;
         float scale = (float) Math.max(1.0, dist / 60.0);
         Vec3 p = bomb.position().add(0, 0.3, 0);
         Vec3 v = bomb.getDeltaMovement();
-        int sparks = count(3f * density * lod);
-        for (int n = 0; n < sparks; n++) {
-            double t = RANDOM.nextDouble();
-            spark(mc.level, p.x - v.x * t, p.y - v.y * t, p.z - v.z * t,
-                    v.x * 0.15 + RANDOM.nextGaussian() * 0.02, v.y * 0.15 + RANDOM.nextGaussian() * 0.02, v.z * 0.15 + RANDOM.nextGaussian() * 0.02,
-                    (0.16f + RANDOM.nextFloat() * 0.16f) * scale, 0.75f + RANDOM.nextFloat() * 0.2f, 10 + RANDOM.nextInt(14));
+        if (SparkParticle.sprites != null && density > 0) {
+            int sparks = count(3f * density * lod);
+            for (int n = 0; n < sparks; n++) {
+                double t = RANDOM.nextDouble();
+                spark(mc.level, p.x - v.x * t, p.y - v.y * t, p.z - v.z * t,
+                        v.x * 0.15 + RANDOM.nextGaussian() * 0.02, v.y * 0.15 + RANDOM.nextGaussian() * 0.02, v.z * 0.15 + RANDOM.nextGaussian() * 0.02,
+                        (0.16f + RANDOM.nextFloat() * 0.16f) * scale, 0.75f + RANDOM.nextFloat() * 0.2f, 10 + RANDOM.nextInt(14));
+            }
         }
-        if (RANDOM.nextFloat() < 0.8f * density * lod) {
-            ash(mc.level, AshParticle.Kind.TRAIL, p.x, p.y, p.z, 0, 0.02, 0);
+        if (bomb.tickCount % 2 == 0) {
+            VoxelCloud cloud = nearestCloud(p);
+            if (cloud != null) {
+                cloud.puff(p.x, p.y, p.z, 0, 0.02, 0, 0.45f, 0.03f, 18 + RANDOM.nextInt(10), 0.2f, 0.19f, 0.18f, 0.2f);
+            }
         }
     }
 
-    /** A Vulcanian / Strombolian blast: dark ash jets and a shower of glowing ejecta, instantly visible. */
-    private static void blastEjecta(ClientDisaster d, ClientLevel level, double dist) {
-        float density = density();
-        if (density <= 0 || !ready() || dist > 600) return;
-        Vec3 vent = vent(d);
-        Vec3 wind = wind(d);
-        int i = d.intensity;
-        float scale = (float) Math.max(1.0, dist / 70.0);
-        int sparks = count((50 + 30 * i) * density / Math.min(scale, 3f));
-        for (int n = 0; n < sparks; n++) {
-            double a = RANDOM.nextDouble() * Math.PI * 2;
-            double tilt = RANDOM.nextDouble() * 0.9;        // up to ~50° from vertical
-            double sp = 0.6 + RANDOM.nextDouble() * (0.6 + i * 0.15);
-            spark(level, vent.x, vent.y + 0.5, vent.z, Math.cos(a) * Math.sin(tilt) * sp, Math.cos(tilt) * sp,
-                    Math.sin(a) * Math.sin(tilt) * sp, (0.2f + RANDOM.nextFloat() * 0.35f) * scale,
-                    0.9f + RANDOM.nextFloat() * 0.1f, 40 + RANDOM.nextInt(50));
+    private static VoxelCloud nearestCloud(Vec3 p) {
+        VoxelCloud best = null;
+        double bd = Double.MAX_VALUE;
+        for (ClientDisaster d : ClientDisasters.all()) {
+            if (d.type != DisasterType.VOLCANO || !(d.visualState instanceof State st) || st.cloud == null) continue;
+            double dd = d.pos().distanceToSqr(p);
+            if (dd < bd) {
+                bd = dd;
+                best = st.cloud;
+            }
         }
-        // Cock's-tail jets of dark, ash-laden gas punching up and out of the crater.
-        int jets = count((10 + 4 * i) * density);
-        for (int n = 0; n < jets; n++) {
+        return best;
+    }
+
+    /** A Vulcanian / Strombolian blast: dark ash jets punching out of the crater and a shower of glowing ejecta. */
+    private static void blastEjecta(ClientDisaster d, State st, ClientLevel level, double dist) {
+        Vec3 vent = vent(d);
+        int i = d.intensity;
+        float density = density();
+        if (SparkParticle.sprites != null && density > 0 && dist < 600) {
+            float scale = (float) Math.max(1.0, dist / 70.0);
+            int sparks = count((50 + 30 * i) * density / Math.min(scale, 3f));
+            for (int n = 0; n < sparks; n++) {
+                double a = RANDOM.nextDouble() * Math.PI * 2;
+                double tilt = RANDOM.nextDouble() * 0.9;
+                double sp = 0.6 + RANDOM.nextDouble() * (0.6 + i * 0.15);
+                spark(level, vent.x, vent.y + 0.5, vent.z, Math.cos(a) * Math.sin(tilt) * sp, Math.cos(tilt) * sp,
+                        Math.sin(a) * Math.sin(tilt) * sp, (0.2f + RANDOM.nextFloat() * 0.35f) * scale,
+                        0.9f + RANDOM.nextFloat() * 0.1f, 40 + RANDOM.nextInt(50));
+            }
+        }
+        // Cock's-tail jets of dark, ash-laden gas.
+        for (int n = 0; n < 12 + 5 * i; n++) {
             double a = RANDOM.nextDouble() * Math.PI * 2;
-            double out = RANDOM.nextDouble() * 0.35;
-            double up = 0.9 + RANDOM.nextDouble() * (0.5 + i * 0.12);
-            float shade = 0.14f + RANDOM.nextFloat() * 0.08f;
-            ash(level, AshParticle.Kind.PLUME, vent.x, vent.y + 1, vent.z, Math.cos(a) * out, up, Math.sin(a) * out)
-                    .updraft(0.3).wind(wind.x * 0.05, wind.z * 0.05)
-                    .size(3f + RANDOM.nextFloat() * 3f, 2.4f).tint(shade, shade * 0.93f, shade * 0.88f);
+            double out = RANDOM.nextDouble() * 0.5;
+            double up = 0.9 + RANDOM.nextDouble() * (0.6 + i * 0.15);
+            float shade = 0.16f + RANDOM.nextFloat() * 0.08f;
+            st.cloud.puff(vent.x, vent.y + 1, vent.z, Math.cos(a) * out, up, Math.sin(a) * out,
+                    1.5f + RANDOM.nextFloat() * (1 + i * 0.5f), 0.12f + i * 0.02f, 50 + RANDOM.nextInt(40),
+                    shade, shade * 0.95f, shade * 0.9f, 0.4f);
         }
     }
 
@@ -430,7 +373,7 @@ public final class VolcanoVisual implements DisasterVisual {
             st.lastBlasts = blasts;
         } else if (blasts > st.lastBlasts) {
             st.lastBlasts = blasts;
-            blastEjecta(d, level, dist);
+            blastEjecta(d, st, level, dist);
             // Light is instant, sound and the pressure wave travel: delay by distance.
             st.pendingBlasts.add(new int[]{(int) Math.min(80, dist / SOUND_SPEED)});
         }
@@ -439,7 +382,7 @@ public final class VolcanoVisual implements DisasterVisual {
             int[] b = it.next();
             if (--b[0] > 0) continue;
             it.remove();
-            float near = 1f - smoothstep(20f, 280f, (float) dist);
+            float near = 1f - smoothstep(20f, 280f + d.intensity * 40f, (float) dist);
             st.blastShake = Math.max(st.blastShake, (0.25f + d.intensity * 0.15f) * near);
             float volume = 0.15f + 0.85f * (1f - smoothstep(30f, 700f, (float) dist));
             playAt(d, cam, ModRegistries.VOLCANO_BLAST.get(), volume, 0.75f + RANDOM.nextFloat() * 0.2f);
@@ -461,10 +404,14 @@ public final class VolcanoVisual implements DisasterVisual {
                     x -> {
                         double dist = horizontal(x.pos(), Minecraft.getInstance().gameRenderer.getMainCamera().position());
                         float s = Math.max(x.strength(), x.phase == Phase.WARNING ? 0.35f * x.phaseProgress : 0f);
-                        return s * (1 - smoothstep(30f, 600f, (float) dist)) * (0.5 + 0.1 * x.intensity);
+                        return s * (1 - smoothstep(30f, 700f, (float) dist)) * (0.5 + 0.1 * x.intensity);
                     },
                     x -> 1.0);
             sounds.play(st.distant);
+        }
+        if (pdcActive(d) && (st.pdcSound == null || st.pdcSound.isStopped())) {
+            st.pdcSound = new FrontSound(d.id);
+            sounds.play(st.pdcSound);
         }
         // Warning signs: deep rumbles while the magma rises.
         if (d.phase == Phase.WARNING || d.phase == Phase.BUILDUP) {
@@ -472,6 +419,49 @@ public final class VolcanoVisual implements DisasterVisual {
                 st.nextRumble = 80 + RANDOM.nextInt(120);
                 playAt(d, cam, ModRegistries.DISTANT_RUMBLE.get(), 0.6f + 0.4f * d.strength(), 0.5f + RANDOM.nextFloat() * 0.2f);
             }
+        }
+    }
+
+    /** The roar of a pyroclastic flow, placed at the part of its front nearest to the listener. */
+    private static final class FrontSound extends AbstractTickableSoundInstance {
+        private final int disasterId;
+        private float current;
+
+        FrontSound(int disasterId) {
+            super(ModRegistries.VOLCANO_RUMBLE.get(), SoundSource.WEATHER, RandomSource.create());
+            this.disasterId = disasterId;
+            this.looping = true;
+            this.volume = 0.0001f;
+            this.pitch = 0.6f;
+            this.attenuation = SoundInstance.Attenuation.LINEAR;
+        }
+
+        @Override
+        public void tick() {
+            ClientDisaster d = ClientDisasters.get(disasterId);
+            boolean on = d != null && pdcActive(d);
+            current += ((on ? 3.5f : 0f) - current) * 0.08f;
+            if (!on && current < 0.02f) {
+                stop();
+                return;
+            }
+            volume = Math.max(0.0001f, current);
+            if (d != null && on) {
+                Vec3 cam = Minecraft.getInstance().gameRenderer.getMainCamera().position();
+                Vec3 f = nearestFront(d, cam);
+                x = f.x;
+                y = cam.y;
+                z = f.z;
+            }
+        }
+
+        void end() {
+            stop();
+        }
+
+        @Override
+        public boolean canStartSilent() {
+            return true;
         }
     }
 
@@ -488,6 +478,7 @@ public final class VolcanoVisual implements DisasterVisual {
         if (d.visualState instanceof State st) {
             if (st.rumble != null) st.rumble.end();
             if (st.distant != null) st.distant.end();
+            if (st.pdcSound != null) st.pdcSound.end();
         }
     }
 

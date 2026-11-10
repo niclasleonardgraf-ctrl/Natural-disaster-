@@ -1,7 +1,14 @@
 package com.realisticdisasters.registry;
 
 import com.realisticdisasters.RealisticDisasters;
+import com.realisticdisasters.disaster.volcano.AshLayerBlock;
 import com.realisticdisasters.disaster.volcano.LavaBombEntity;
+import net.minecraft.world.level.block.SnowLayerBlock;
+import net.minecraft.world.level.block.SoundType;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.material.MapColor;
+import net.minecraft.world.level.material.PushReaction;
+import net.neoforged.neoforge.registries.DeferredBlock;
 import net.minecraft.core.particles.ParticleType;
 import net.minecraft.core.particles.SimpleParticleType;
 import net.minecraft.core.registries.Registries;
@@ -64,6 +71,13 @@ public final class ModRegistries {
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> LAVA_SPARK =
             PARTICLES.register("lava_spark", () -> new SimpleParticleType(false));
 
+    // Blocks
+    public static final DeferredRegister.Blocks BLOCKS = DeferredRegister.createBlocks(RealisticDisasters.MODID);
+    public static final DeferredBlock<AshLayerBlock> VOLCANIC_ASH = BLOCKS.registerBlock("volcanic_ash", AshLayerBlock::new,
+            () -> BlockBehaviour.Properties.of().mapColor(MapColor.COLOR_GRAY).replaceable().forceSolidOff()
+                    .strength(0.2f).sound(SoundType.SAND).pushReaction(PushReaction.DESTROY)
+                    .isViewBlocking((st, l, p) -> st.getValue(SnowLayerBlock.LAYERS) >= 8));
+
     // Entities
     public static final DeferredRegister.Entities ENTITY_TYPES = DeferredRegister.createEntities(RealisticDisasters.MODID);
     public static final DeferredHolder<EntityType<?>, EntityType<LavaBombEntity>> LAVA_BOMB =
@@ -88,6 +102,7 @@ public final class ModRegistries {
         SOUNDS.register(modBus);
         PARTICLES.register(modBus);
         ENTITY_TYPES.register(modBus);
+        BLOCKS.register(modBus);
     }
 
     private ModRegistries() {}

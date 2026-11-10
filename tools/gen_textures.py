@@ -297,6 +297,21 @@ def lava_spark(seed, size=16):
     return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
 
 
+def volcanic_ash_block(seed=1000, size=16):
+    """16x16 block texture in the vanilla style: fine, speckled grey ash with a few darker scoria grains."""
+    rng = random.Random(seed)
+    img = Image.new("RGBA", (size, size))
+    ramp = [(132, 128, 124), (122, 118, 114), (112, 109, 106), (101, 98, 96), (90, 88, 86)]
+    for y in range(size):
+        for x in range(size):
+            v = rng.random()
+            idx = 0 if v < 0.18 else 1 if v < 0.5 else 2 if v < 0.82 else 3 if v < 0.95 else 4
+            img.putpixel((x, y), ramp[idx] + (255,))
+    for _ in range(6):  # dark scoria grains
+        img.putpixel((rng.randrange(size), rng.randrange(size)), (64, 60, 58, 255))
+    return img
+
+
 def write(img, name):
     os.makedirs(PARTICLES, exist_ok=True)
     img.save(os.path.join(PARTICLES, name + ".png"))
@@ -321,6 +336,9 @@ def main():
         write(ash_shaft(800 + i), f"ash_shaft_{i}")
     for i in range(3):
         write(lava_spark(900 + i), f"lava_spark_{i}")
+    blocks = os.path.join(ROOT, "assets", "realisticdisasters", "textures", "block")
+    os.makedirs(blocks, exist_ok=True)
+    volcanic_ash_block().save(os.path.join(blocks, "volcanic_ash.png"))
 
     # Realistic rain (overrides vanilla's blue rain texture; applies to all rain in the game).
     env = os.path.join(ROOT, "assets", "minecraft", "textures", "environment")

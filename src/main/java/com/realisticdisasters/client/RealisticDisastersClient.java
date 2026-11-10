@@ -5,6 +5,7 @@ import com.realisticdisasters.client.particle.VortexParticle;
 import com.realisticdisasters.client.volcano.AshParticle;
 import com.realisticdisasters.client.volcano.SmokeLayer;
 import com.realisticdisasters.client.volcano.SparkParticle;
+import com.realisticdisasters.client.volcano.VoxelCloudRenderer;
 import net.neoforged.neoforge.client.event.RegisterRenderPipelinesEvent;
 import com.realisticdisasters.client.volcano.VolcanoVisual;
 import com.realisticdisasters.disaster.volcano.LavaBombEntity;
@@ -31,6 +32,7 @@ public class RealisticDisastersClient {
         modBus.addListener(RealisticDisastersClient::registerParticles);
         modBus.addListener(RealisticDisastersClient::registerEntityRenderers);
         modBus.addListener((RegisterRenderPipelinesEvent e) -> e.registerPipeline(SmokeLayer.PIPELINE));
+        modBus.addListener(VoxelCloudRenderer::registerPipelines);
         LavaBombEntity.CLIENT_TRAIL = VolcanoVisual::bombTrail;
     }
 

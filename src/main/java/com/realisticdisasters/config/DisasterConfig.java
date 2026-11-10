@@ -43,6 +43,8 @@ public final class DisasterConfig {
     public static final ModConfigSpec.BooleanValue VOLCANO_LAVA_FLOWS;
     public static final ModConfigSpec.IntValue VOLCANO_COOLING_TICKS;
     public static final ModConfigSpec.BooleanValue VOLCANO_LIGHTNING;
+    public static final ModConfigSpec.BooleanValue VOLCANO_PYROCLASTIC_FLOWS;
+    public static final ModConfigSpec.BooleanValue VOLCANO_ASH_FALL;
 
     static {
         B.push("general");
@@ -104,7 +106,7 @@ public final class DisasterConfig {
                 .defineInRange("maxBombs", 40, 0, 400);
         VOLCANO_DURATION_SCALE = B.comment("Multiplier for how long the eruption lasts.")
                 .defineInRange("durationScale", 1.0, 0.1, 10.0);
-        VOLCANO_BUILD_CONE = B.comment("Build a small cinder cone around the vent when the ground there is flat.")
+        VOLCANO_BUILD_CONE = B.comment("Grow the volcano's mountain (from a ~10-block cone at intensity 1 to a ~130-block mountain at 5).")
                 .define("buildCone", true);
         VOLCANO_LAVA_FLOWS = B.comment("Let lava flows pour downhill from the vent.")
                 .define("lavaFlows", true);
@@ -112,6 +114,10 @@ public final class DisasterConfig {
                 .defineInRange("coolingTicks", 900, 20, 72_000);
         VOLCANO_LIGHTNING = B.comment("Volcanic lightning in the ash column (visual only, never starts fires).")
                 .define("lightning", true);
+        VOLCANO_PYROCLASTIC_FLOWS = B.comment("Pyroclastic flows (hot ash avalanches) at intensity 3 and above.")
+                .define("pyroclasticFlows", true);
+        VOLCANO_ASH_FALL = B.comment("Volcanic ash settles in layers on the ground downwind.")
+                .define("ashFall", true);
         B.pop();
     }
 

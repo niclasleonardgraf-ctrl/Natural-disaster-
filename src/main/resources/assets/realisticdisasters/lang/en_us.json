@@ -5,6 +5,8 @@
   "disaster.realisticdisasters.volcano": "Volcano",
   "disaster.realisticdisasters.volcano.warning": "The ground trembles and the air smells of sulphur... magma is rising nearby.",
   "disaster.realisticdisasters.volcano.onset": "The volcano is erupting! Get clear of the vent and the lava!",
+  "disaster.realisticdisasters.volcano.pyroclastic": "Pyroclastic flow! A glowing avalanche of ash is racing down the mountain - run!",
+  "block.realisticdisasters.volcanic_ash": "Volcanic Ash",
 
   "phase.realisticdisasters.warning": "Warning",
   "phase.realisticdisasters.buildup": "Buildup",
