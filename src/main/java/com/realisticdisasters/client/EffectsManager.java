@@ -28,12 +28,33 @@ public final class EffectsManager {
     private static final float[] sky = new float[4], fog = new float[4], cloud = new float[4]; // r,g,b,weight
     private static float darkness, fogEnd = 512f, fogAmount, shake, prevShake, fovPulse;
     private static long ticks;
+    // in-cloud lightning: a short flicker sequence
+    private static final float[] FLICKER = {1f, 0.25f, 0.85f, 0.15f, 0.55f, 0.1f, 0.25f, 0f};
+    private static int flashStep = -1;
+    private static float flashStrength, flash;
+
+    /** Starts an in-cloud lightning flicker (0..1 strength). */
+    public static void triggerFlash(float strength) {
+        flashStep = 0;
+        flashStrength = Mth.clamp(strength, 0f, 1f);
+    }
+
+    /** Current lightning flash brightness 0..1. */
+    public static float flash() {
+        return flash;
+    }
 
     @SubscribeEvent
     public static void onClientTick(ClientTickEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || mc.isPaused()) return;
         ticks++;
+        if (flashStep >= 0) {
+            flash = flashStep < FLICKER.length ? FLICKER[flashStep] * flashStrength : 0f;
+            if (++flashStep > FLICKER.length) flashStep = -1;
+        } else {
+            flash = 0f;
+        }
         ClientDisasters.tick();
 
         Camera camera = mc.gameRenderer.getMainCamera();
@@ -100,7 +121,9 @@ public final class EffectsManager {
     }
 
     public static int skyColor(int base) {
-        return ClientConfig.SKY_TINT.getAsBoolean() ? tint(base, sky, 0.9f) : base;
+        if (!ClientConfig.SKY_TINT.getAsBoolean()) return base;
+        int c = tint(base, sky, 0.95f);
+        return flash > 0f ? ARGB.srgbLerp(flash * 0.55f, c, 0xFFC9CEDD) : c;
     }
 
     public static int cloudColor(int base) {
@@ -116,7 +139,7 @@ public final class EffectsManager {
     }
 
     public static float skyLightFactor(float base) {
-        return ClientConfig.SKY_TINT.getAsBoolean() ? base * (1f - Mth.clamp(darkness, 0, 0.85f)) : base;
+        return ClientConfig.SKY_TINT.getAsBoolean() ? base * (1f - Mth.clamp(darkness, 0, 0.85f) * (1f - flash * 0.7f)) : base;
     }
 
     // ------------------------------------------------------------------ viewport events
@@ -128,7 +151,7 @@ public final class EffectsManager {
         float targetFar = Math.min(far, fogEnd);
         float newFar = Mth.lerp(Mth.clamp(fogAmount, 0, 1), far, targetFar);
         event.setFarPlaneDistance(newFar);
-        event.setNearPlaneDistance(Math.min(event.getNearPlaneDistance(), newFar * 0.15f));
+        event.setNearPlaneDistance(Math.min(event.getNearPlaneDistance(), newFar * 0.4f));
     }
 
     @SubscribeEvent

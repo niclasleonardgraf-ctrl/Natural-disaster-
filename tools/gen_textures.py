@@ -149,6 +149,78 @@ def smooth_cloud(seed, size=64):
     return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
 
 
+def funnel_streak(seed, size=64):
+    """Funnel surface texture: fine vertical streaks (laid on the funnel at a slant -> helical striations)."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    cols = fbm(size, rng, octaves=4, base=10)[size // 2]          # streak profile across x
+    vert = fbm(size, rng, octaves=3, base=2)                       # slow variation along the streaks
+    light = np.clip(0.62 + 0.55 * (cols[None, :] - 0.5) + 0.15 * (vert - 0.5), 0, 1)
+    y = np.linspace(-1, 1, size)[:, None]
+    x = np.linspace(-1, 1, size)[None, :]
+    a = np.clip(1 - np.abs(x) ** 2.2, 0, 1) * np.clip(1 - np.abs(y) ** 4, 0, 1) * (0.8 + 0.2 * vert)
+    rgb = (light * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (np.clip(a, 0, 1) * 255).astype("uint8")]), "RGBA")
+
+
+def deck_band(seed, size=64):
+    """Curved-looking horizontal band for cloud-base striations: long soft streak along x."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    along = fbm(size, rng, octaves=4, base=3)[size // 3]           # variation along the band
+    fine = fbm(size, rng, octaves=5, base=8)
+    y = np.linspace(-1, 1, size)[:, None]
+    x = np.linspace(-1, 1, size)[None, :]
+    a = np.exp(-(y / 0.42) ** 2) * np.clip(1 - np.abs(x) ** 3, 0, 1) * (0.45 + 0.55 * along[None, :]) * (0.75 + 0.25 * fine)
+    light = np.clip(0.7 + 0.25 * (fine - 0.5) + 0.12 * (-y), 0, 1)
+    rgb = (light * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (np.clip(a, 0, 1) * 255).astype("uint8")]), "RGBA")
+
+
+def base_tile(seed, size=64):
+    """Cloud-base tile: mostly opaque, with rolls/streaks along x and a soft rounded-square rim, so many tiles
+    merge into one continuous, structured ceiling (no visible round puffs)."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    big = fbm(size, rng, octaves=3, base=2)
+    rows = fbm(size, rng, octaves=4, base=6)[:, size // 2]           # roll structure across y
+    fine = fbm(size, rng, octaves=5, base=10)
+    y = np.linspace(-1, 1, size)[:, None]
+    x = np.linspace(-1, 1, size)[None, :]
+    # wide, noisy, rounded rim: no straight tile edges even when lightning lights the base
+    d = np.sqrt((np.abs(x) ** 4 + np.abs(y) ** 4) ** 0.5) + (big - 0.5) * 0.35
+    rim = np.clip((1.0 - d) / 0.75, 0, 1)
+    rim = rim * rim * (3 - 2 * rim)
+    a = np.clip(rim * (0.82 + 0.3 * (big - 0.5)), 0, 1)
+    light = 0.55 + 0.45 * (rows[:, None] - 0.5) * 2 * 0.6 + 0.25 * (fine - 0.5) + 0.2 * (big - 0.5)
+    light = np.clip(light, 0, 1)
+    rgb = (light * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
+
+
+def realistic_rain(seed, w=64, h=256):
+    """Replacement for vanilla's rain.png: dense, thin, tapered, semi-transparent grey-white streaks.
+    Vanilla maps the full width to one block and 64 px of height to one block, tiling vertically."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    a = np.zeros((h, w))
+    for _ in range(48):
+        x = rng.integers(0, w)
+        length = int(rng.integers(14, 52))
+        y0 = int(rng.integers(0, h))
+        peak = rng.uniform(0.12, 0.42)
+        t = np.linspace(0, 1, length)
+        profile = np.sin(np.pi * t) ** 1.5 * peak        # tapered both ends (motion blur look)
+        for i, v in enumerate(profile):
+            yy = (y0 + i) % h
+            a[yy, x] = max(a[yy, x], v)
+            if peak > 0.36 and x + 1 < w:                  # a few heavier near-field drops
+                a[yy, x + 1] = max(a[yy, x + 1], v * 0.35)
+    rgb = np.zeros((h, w, 3), dtype="uint8")
+    rgb[..., 0], rgb[..., 1], rgb[..., 2] = 208, 214, 222
+    return Image.fromarray(np.dstack([rgb, (np.clip(a, 0, 1) * 255).astype("uint8")]), "RGBA")
+
+
 def rain_shaft(seed, size=64):
     """Translucent rain curtain: soft vertical streaks fading out at the top and bottom."""
     import numpy as np
@@ -174,10 +246,19 @@ def main():
     for i in range(4):
         write(smooth_cloud(100 + i), f"funnel_cloud_{i}")
         write(deck_cloud(500 + i), f"deck_cloud_{i}")
+        write(funnel_streak(600 + i), f"funnel_streak_{i}")
+        write(deck_band(700 + i), f"deck_band_{i}")
+        write(base_tile(800 + i), f"base_tile_{i}")
+
         write(soft_cloud(200 + i, density=0.85, wispy=True), f"dust_cloud_{i}")
         write(rain_shaft(400 + i), f"rain_shaft_{i}")
         write(debris_texture(300 + i), f"storm_debris_{i}")
         write(soft_cloud(600 + i, density=0.8, wispy=True), f"quake_dust_{i}")  # earthquake rock dust
+
+    # Realistic rain (overrides vanilla's blue rain texture; applies to all rain in the game).
+    env = os.path.join(ROOT, "assets", "minecraft", "textures", "environment")
+    os.makedirs(env, exist_ok=True)
+    realistic_rain(900).save(os.path.join(env, "rain.png"))
 
     # 16x16 mod icon (tornado silhouette on a storm sky), upscaled with nearest neighbour for the mod list.
     icon = Image.new("RGBA", (16, 16), (78, 91, 71, 255))
