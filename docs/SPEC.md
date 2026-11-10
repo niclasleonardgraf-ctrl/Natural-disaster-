@@ -8,10 +8,12 @@ Sections are self-contained so a session can read only the part it needs.
 
 ## 1. Style
 
-The mod should feel cinematic and immersive while still looking clearly like Minecraft, like a Mojang-made disaster update.
-
-- Textures are pixel art at 16x16 or 8x8 in a vanilla palette, with no smooth gradients and no high-res or realistic images.
-- Generate textures with a small script that writes PNGs (`tools/gen_textures.py`).
+**Realistic and cinematic first** (changed at the user's request: realism beats the "Mojang-made" pixel look).
+It should feel like a disaster film, while running on Minecraft's own renderer.
+- Textures are soft, smooth and high-resolution (e.g. 64x64+ with alpha gradients), generated procedurally by a
+  script that writes PNGs (`tools/gen_textures.py`). No photos or images taken from elsewhere.
+- Prefer translucent, layered particles that build up real volume; natural, desaturated colour palettes; strong
+  lighting contrast (lit vs. shadowed side, dark cloud base vs. bright horizon).
 - Use original or CC0 sounds and list them in `CREDITS.md`.
 - Don't copy other mods' code or assets.
 - Effects must work in vanilla rendering and with shader packs (Iris, if available).

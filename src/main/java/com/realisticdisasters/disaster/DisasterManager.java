@@ -232,13 +232,35 @@ public final class DisasterManager {
             // Move the viewer to open ground (dev worlds often spawn you next to structures), looking south, tilted up.
             double px = player.getX() + 160, pz = player.getZ() - 40;
             int py = level.getHeight(Heightmap.Types.MOTION_BLOCKING, Mth.floor(px), Mth.floor(pz));
+            // Stand on a small dirt pillar so trees don't block the view.
+            for (int i = 0; i < 6; i++) level.setBlockAndUpdate(new BlockPos(Mth.floor(px), py + i, Mth.floor(pz)),
+                    net.minecraft.world.level.block.Blocks.COARSE_DIRT.defaultBlockState());
+            py += 6;
             player.connection.teleport(px, py, pz, 0f, -12f);
-            Vec3 at = new Vec3(px, py, pz + 55);
+            Vec3 at = new Vec3(px, py, pz + 105);
+            plantDevForest(level, at, Mth.floor(px), Mth.floor(pz));
             int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, Mth.floor(at.x), Mth.floor(at.z));
             Disaster d = start(level, type, new Vec3(at.x, y, at.z), intensity);
             if (p.length > 2) d.skipTo(com.realisticdisasters.disaster.Phase.valueOf(p[2].trim().toUpperCase(java.util.Locale.ROOT)));
         } catch (RuntimeException e) {
             RealisticDisasters.LOGGER.warn("Bad realisticdisasters.autostart value '{}'", spec, e);
+        }
+    }
+
+    /** Dev only: scatter trees around the test tornado for scale and visible destruction. */
+    private static void plantDevForest(ServerLevel level, Vec3 center, int viewX, int viewZ) {
+        var features = level.registryAccess().lookupOrThrow(Registries.CONFIGURED_FEATURE);
+        var random = level.getRandom();
+        var keys = List.of(net.minecraft.data.worldgen.features.TreeFeatures.OAK,
+                net.minecraft.data.worldgen.features.TreeFeatures.BIRCH,
+                net.minecraft.data.worldgen.features.TreeFeatures.FANCY_OAK);
+        for (int i = 0; i < 140; i++) {
+            int x = Mth.floor(center.x + (random.nextDouble() - 0.5) * 160);
+            int z = Mth.floor(center.z + (random.nextDouble() - 0.5) * 160);
+            if (Math.abs(x - viewX) < 40 && z - viewZ < 60) continue; // keep the camera's view clear
+            int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z);
+            features.get(keys.get(random.nextInt(keys.size()))).ifPresent(f ->
+                    f.value().place(level, level.getChunkSource().getGenerator(), random, new BlockPos(x, y, z)));
         }
     }
 

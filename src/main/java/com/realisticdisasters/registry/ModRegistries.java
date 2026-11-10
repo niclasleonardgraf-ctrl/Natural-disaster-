@@ -21,6 +21,11 @@ public final class ModRegistries {
     public static final DeferredHolder<SoundEvent, SoundEvent> TORNADO_DISTANT = sound("disaster.tornado.distant");
     public static final DeferredHolder<SoundEvent, SoundEvent> DISTANT_RUMBLE = sound("disaster.rumble");
     public static final DeferredHolder<SoundEvent, SoundEvent> WIND_GUST = sound("disaster.wind_gust");
+    public static final DeferredHolder<SoundEvent, SoundEvent> TORNADO_CORE = sound("disaster.tornado.core");
+    public static final DeferredHolder<SoundEvent, SoundEvent> WIND_HOWL = sound("disaster.wind_howl");
+    public static final DeferredHolder<SoundEvent, SoundEvent> DEBRIS_THUD = sound("disaster.debris_thud");
+    public static final DeferredHolder<SoundEvent, SoundEvent> WOOD_SNAP = sound("disaster.wood_snap");
+    public static final DeferredHolder<SoundEvent, SoundEvent> DEBRIS_RATTLE = sound("disaster.debris_rattle");
     public static final DeferredHolder<SoundEvent, SoundEvent> METEOR_WHOOSH = sound("disaster.meteor.whoosh");
     public static final DeferredHolder<SoundEvent, SoundEvent> METEOR_WHOOSH_DISTANT = sound("disaster.meteor.whoosh_distant");
     public static final DeferredHolder<SoundEvent, SoundEvent> METEOR_IMPACT = sound("disaster.meteor.impact");
@@ -31,6 +36,18 @@ public final class ModRegistries {
             PARTICLES.register("funnel_cloud", () -> new SimpleParticleType(true));
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> STORM_DEBRIS =
             PARTICLES.register("storm_debris", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> WALL_CLOUD =
+            PARTICLES.register("wall_cloud", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> DUST_INFLOW =
+            PARTICLES.register("dust_inflow", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FUNNEL_SURFACE =
+            PARTICLES.register("funnel_surface", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> CLOUD_SHEET =
+            PARTICLES.register("cloud_sheet", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> CLOUD_BAND =
+            PARTICLES.register("cloud_band", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> RAIN_SHAFT =
+            PARTICLES.register("rain_shaft", () -> new SimpleParticleType(true));
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> DUST_CLOUD =
             PARTICLES.register("dust_cloud", () -> new SimpleParticleType(true));
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> METEOR_STREAK =
