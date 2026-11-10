@@ -23,6 +23,8 @@ public final class DisasterVisuals {
 
     static {
         VISUALS.put(DisasterType.TORNADO, new TornadoVisual());
+        VISUALS.put(DisasterType.BLIZZARD, new com.realisticdisasters.client.windstorm.BlizzardVisual());
+        VISUALS.put(DisasterType.SANDSTORM, new com.realisticdisasters.client.windstorm.SandstormVisual());
     }
 
     public static DisasterVisual get(DisasterType type) {

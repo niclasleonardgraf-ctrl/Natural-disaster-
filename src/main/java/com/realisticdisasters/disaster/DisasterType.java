@@ -8,6 +8,8 @@ import java.util.function.Supplier;
 
 import com.realisticdisasters.config.DisasterConfig;
 import com.realisticdisasters.disaster.tornado.TornadoDisaster;
+import com.realisticdisasters.disaster.windstorm.BlizzardDisaster;
+import com.realisticdisasters.disaster.windstorm.SandstormDisaster;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
 
@@ -16,7 +18,11 @@ import net.minecraft.world.phys.Vec3;
  */
 public enum DisasterType {
     TORNADO(TornadoDisaster::new, DisasterConfig.TORNADO_ENABLED::getAsBoolean,
-            DisasterConfig.TORNADO_WEIGHT::getAsInt, DisasterConfig.TORNADO_BIOMES::get);
+            DisasterConfig.TORNADO_WEIGHT::getAsInt, DisasterConfig.TORNADO_BIOMES::get),
+    BLIZZARD(BlizzardDisaster::new, DisasterConfig.BLIZZARD_ENABLED::getAsBoolean,
+            DisasterConfig.BLIZZARD_WEIGHT::getAsInt, DisasterConfig.BLIZZARD_BIOMES::get),
+    SANDSTORM(SandstormDisaster::new, DisasterConfig.SANDSTORM_ENABLED::getAsBoolean,
+            DisasterConfig.SANDSTORM_WEIGHT::getAsInt, DisasterConfig.SANDSTORM_BIOMES::get);
 
     public interface Factory {
         Disaster create(ServerLevel level, int id, Vec3 pos, int intensity);
