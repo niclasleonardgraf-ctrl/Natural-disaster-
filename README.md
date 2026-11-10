@@ -100,6 +100,24 @@ Implementation notes: oriented quads come from overriding `VortexParticle#extrac
 large particles by their real size (vanilla culls by centre point). All quad particles share vanilla's
 16384-particle queue, so the spawn budget keeps the storm around 11k particles.
 
+### 3D funnel mesh
+The funnel is real 3D geometry, generated in code every frame (`client/tornado/FunnelRenderer`). Nested tube meshes
+(about 44 rings × 64 segments each) follow the snaking, tilted funnel axis:
+1. an opaque condensation core
+2. a streaky outer shell
+3. a faint outer veil
+4. a dust sheath at the ground
+
+Each layer scrolls its texture around the funnel (rotation from the wind model's angular speed) and upward (rising
+air), with a slight helical slant for striations. The mesh has an irregular, living outline, strong side lighting
+(bright lit flank, dark shadow flank), soft silhouettes, and reacts to lightning. Up close it fades into dark,
+debris-laden murk, because inside a tornado you cannot see a funnel wall. Textures are seamless 256×512 / 256×256
+procedural PNGs with smooth filtering (`.mcmeta` blur).
+
+It is submitted through NeoForge's `SubmitCustomGeometryEvent` into vanilla's translucent entity pipeline, so fog,
+lightmap and shader packs handle it like other world geometry. `meshFunnel = false` in the client config switches back
+to the particle-only funnel (e.g. if a shader pack misbehaves).
+
 ### Tornado physics
 One wind model (`disaster/tornado/TornadoWind`) drives everything, on the server and on the client:
 - **Wind field:** wind speed rises to a peak at the core radius and falls off outside it (a Rankine vortex). Air
@@ -231,6 +249,10 @@ and `tools/gen_block_assets.py` (sand layer blockstates, models, loot tables).
   (WMO cloud atlas, AMS glossary, NWS). I couldn't watch video footage from the build container.
 - Wind shelter samples up to 6 blocks upwind at feet and head height. It doesn't model air flowing around corners
   or over very tall buildings.
+- GameTest batches run concurrently in one world, 37 blocks apart. The wind-storm toggle tests therefore flip the
+  global `blockDestruction` switch only within a single tick. The tornado tests on main are intermittently flaky on
+  their own (3 of 5 runs failed on unmodified main in this session, mostly `tornado_breaks_glass_and_snaps_trees`),
+  because `tornado_respects_block_toggle` keeps the global switch off for 200 ticks while other tests run.
 - Shelter-seeking is a short random search, not a real pathfinding query. In open terrain animals just drift downwind.
 - In the test world (plains) vanilla rain still falls inside a blizzard or sandstorm, because the weather is global.
   In the storms' own biomes it falls as snow (blizzard) or not at all (desert/badlands).
