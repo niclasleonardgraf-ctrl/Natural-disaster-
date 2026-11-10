@@ -22,11 +22,12 @@ import net.minecraft.world.phys.Vec3;
  *   <li>DEBRIS: dark flecks whipped around the base and flung out</li>
  *   <li>DUST: the churning brown debris cloud at the base</li>
  *   <li>INFLOW: dust streamers spiralling in along the ground</li>
+ *   <li>RAIN: grey rain curtains wrapping the rear flank of the storm</li>
  * </ul>
  * Spawn args: xAux = disaster id, yAux = start height fraction, zAux = radius jitter (+100 per variant step).
  */
 public class VortexParticle extends SingleQuadParticle {
-    public enum Kind { CLOUD, WALL, DEBRIS, DUST, INFLOW }
+    public enum Kind { CLOUD, WALL, DEBRIS, DUST, INFLOW, RAIN }
 
     /** Direction the "sun" lights the vortex from (radians, world space). */
     private static final double LIGHT_ANGLE = Math.PI * 0.8;
@@ -66,22 +67,33 @@ public class VortexParticle extends SingleQuadParticle {
         float shade;
         switch (kind) {
             case CLOUD -> {
+                // condensation funnel: cool grey, slightly blue in shadow
                 lifetime = 60 + r.nextInt(60);
                 rise = 0.0015f + r.nextFloat() * 0.003f;
                 spin = 0.12f + r.nextFloat() * 0.05f;
-                shade = 0.40f + r.nextFloat() * 0.14f;
-                baseR = shade; baseG = shade * 1.01f; baseB = shade * 1.04f;
-                minBlockLight = 6;
-                translucent = false;
+                shade = 0.36f + r.nextFloat() * 0.14f;
+                baseR = shade * 0.97f; baseG = shade * 0.98f; baseB = shade * 1.03f;
+                minBlockLight = 7;
+                translucent = true;
             }
             case WALL -> {
+                // cloud base / storm deck: dark slate
                 lifetime = 160 + r.nextInt(120);
                 rise = 0f;
                 spin = jitter >= 4f ? 0.0025f + r.nextFloat() * 0.002f : 0.01f + r.nextFloat() * 0.008f;
-                shade = 0.17f + r.nextFloat() * 0.1f;
-                baseR = shade; baseG = shade * 1.03f; baseB = shade * 1.02f;
-                minBlockLight = 4;
-                translucent = false;
+                shade = 0.26f + r.nextFloat() * 0.12f;
+                baseR = shade * 0.94f; baseG = shade * 0.98f; baseB = shade * 1.06f;
+                minBlockLight = 5;
+                translucent = true;
+            }
+            case RAIN -> {
+                lifetime = 70 + r.nextInt(50);
+                rise = 0f;
+                spin = 0.004f + r.nextFloat() * 0.004f;
+                shade = 0.5f + r.nextFloat() * 0.15f;
+                baseR = shade * 0.93f; baseG = shade * 0.97f; baseB = shade * 1.04f;
+                minBlockLight = 6;
+                translucent = true;
             }
             case DEBRIS -> {
                 lifetime = 30 + r.nextInt(40);
@@ -114,9 +126,14 @@ public class VortexParticle extends SingleQuadParticle {
             }
         }
         setColor(baseR, baseG, baseB);
-        if (translucent) setAlpha(0.55f + r.nextFloat() * 0.35f);
+        if (translucent) setAlpha(switch (kind) {
+            case CLOUD -> 0.95f + r.nextFloat() * 0.05f;
+            case WALL -> 0.9f + r.nextFloat() * 0.1f;
+            case RAIN -> 0.2f + r.nextFloat() * 0.18f;
+            default -> 0.55f + r.nextFloat() * 0.35f;
+        });
         this.quadSize = this.targetSize = 0.5f;
-        this.roll = this.oRoll = r.nextFloat() * Mth.TWO_PI;
+        this.roll = this.oRoll = kind == Kind.RAIN ? 0f : r.nextFloat() * Mth.TWO_PI;
     }
 
     @Override
@@ -149,7 +166,7 @@ public class VortexParticle extends SingleQuadParticle {
             case CLOUD -> {
                 r = TornadoVisual.funnelRadius(d, heightFrac) * jitter;
                 ny = c.y + heightFrac * height;
-                targetSize = Mth.clamp((float) r * 0.62f, 0.6f, 4.4f) * sizeVar;
+                targetSize = Mth.clamp((float) r * 0.85f, 0.9f, 6.0f) * sizeVar;
                 spinScale *= (float) (1.3 - 0.75 * heightFrac);   // tighter = faster
             }
             case WALL -> {
@@ -158,7 +175,7 @@ public class VortexParticle extends SingleQuadParticle {
                 boolean deck = jitter >= 4f;
                 double base = c.y + height * (deck ? 0.97 : 0.9);
                 ny = base + (deck ? 3.5 : 2.0) * sizeVar;
-                targetSize = deck ? (7f + jitter * 0.5f) * sizeVar : (3.6f + jitter * 0.6f) * sizeVar;
+                targetSize = deck ? (10f + jitter * 0.6f) * sizeVar : (5f + jitter * 0.8f) * sizeVar;
             }
             case DEBRIS -> {
                 if (heightFrac > 0.18f) radial += 0.18f;            // thrown out once lifted
@@ -172,14 +189,19 @@ public class VortexParticle extends SingleQuadParticle {
                 radial += 0.03f * (1f - lift);
                 r = (core * (0.5 + 1.3 * jitter) + radial) * (1.0 - 0.6 * lift);
                 ny = c.y + 0.5 + heightFrac * Math.min(24, height * 0.28);
-                targetSize = (1.4f + age / (float) lifetime * 3.2f) * sizeVar;
+                targetSize = (2f + age / (float) lifetime * 4.5f) * sizeVar;
+            }
+            case RAIN -> {
+                r = core * jitter;
+                ny = c.y + heightFrac * height;
+                targetSize = 7f * sizeVar;
             }
             default -> { // INFLOW: spiral in along the ground, then get swept up
                 radial -= 0.09f + 0.05f * strength;
                 r = Math.max(core * 0.6, core * jitter + radial);
                 if (r <= core * 0.6 + 0.01) heightFrac = Math.min(0.2f, heightFrac + 0.01f);
                 ny = c.y + 0.25 + heightFrac * height * 0.4;
-                targetSize = (0.5f + 0.4f * sizeVar);
+                targetSize = (0.9f + 0.7f * sizeVar);
             }
         }
         angle += spin * spinScale;
@@ -194,11 +216,11 @@ public class VortexParticle extends SingleQuadParticle {
         y = ny;
         z = nz;
         quadSize += (targetSize - quadSize) * 0.15f;
-        roll += spin * spinScale * 0.4f;
+        if (kind != Kind.RAIN) roll += spin * spinScale * 0.4f;
 
         // Side lighting gives the vortex volume: the lit flank is paler, the far flank in shadow.
         float lit = (float) (0.5 + 0.5 * Math.cos(angle - LIGHT_ANGLE));
-        float shade = 0.68f + 0.32f * lit;
+        float shade = 0.6f + 0.4f * lit;
         if (kind == Kind.CLOUD) {
             // Helical striations: bands wound around the funnel make the rotation readable.
             shade *= (float) (0.84 + 0.16 * Math.sin(angle * 2.0 - heightFrac * 34.0));
@@ -206,7 +228,7 @@ public class VortexParticle extends SingleQuadParticle {
         if (kind == Kind.CLOUD && heightFrac < 0.25f) {
             // lower funnel picks up the brown of the debris it is ingesting
             float m = (0.25f - heightFrac) / 0.25f * 0.45f;
-            setColor(Mth.lerp(m, baseR, 0.52f) * shade, Mth.lerp(m, baseG, 0.44f) * shade, Mth.lerp(m, baseB, 0.36f) * shade);
+            setColor(Mth.lerp(m, baseR, 0.50f) * shade, Mth.lerp(m, baseG, 0.45f) * shade, Mth.lerp(m, baseB, 0.39f) * shade);
         } else {
             setColor(baseR * shade, baseG * shade, baseB * shade);
         }

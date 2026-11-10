@@ -104,7 +104,11 @@ public final class EffectsManager {
     }
 
     public static int cloudColor(int base) {
-        return ClientConfig.SKY_TINT.getAsBoolean() ? tint(base, cloud, 0.9f) : base;
+        if (!ClientConfig.SKY_TINT.getAsBoolean()) return base;
+        int tinted = tint(base, cloud, 0.9f);
+        // Vanilla's blocky clouds give way to the storm's own soft cloud deck.
+        float keep = 1f - Mth.clamp(cloud[3], 0f, 1f) * 0.95f;
+        return ARGB.color(Math.round(ARGB.alpha(base) * keep), tinted);
     }
 
     public static int fogColor(int base) {

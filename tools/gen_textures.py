@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates the mod's pixel-art textures (16x16 / 8x8, hard-edged, small vanilla-style palettes).
+"""Generates the mod's textures: soft, noise-based 64x64 storm textures (realistic look) plus small debris specks.
 
 Deterministic: re-running produces identical PNGs. Requires Pillow.
 Usage: python3 tools/gen_textures.py
@@ -76,15 +76,77 @@ def debris_texture(seed, size=8):
     return img
 
 
+def fbm(size, rng, octaves=5, base=4):
+    """Tileless fractal value noise in 0..1 (numpy), used for soft realistic cloud textures."""
+    import numpy as np
+    out = np.zeros((size, size))
+    amp, total = 1.0, 0.0
+    for o in range(octaves):
+        cells = base * (2 ** o)
+        grid = rng.random((cells + 1, cells + 1))
+        xs = np.linspace(0, cells, size, endpoint=False)
+        xi = xs.astype(int)
+        xf = xs - xi
+        xf = xf * xf * (3 - 2 * xf)
+        g00 = grid[np.ix_(xi, xi)]
+        g10 = grid[np.ix_(xi + 1, xi)]
+        g01 = grid[np.ix_(xi, xi + 1)]
+        g11 = grid[np.ix_(xi + 1, xi + 1)]
+        top = g00 + (g10 - g00) * xf[:, None]
+        bot = g01 + (g11 - g01) * xf[:, None]
+        out += (top + (bot - top) * xf[None, :]) * amp
+        total += amp
+        amp *= 0.5
+    return out / total
+
+
+def soft_cloud(seed, size=64, density=1.0, wispy=False):
+    """Soft, volumetric-looking cloud puff: noisy round falloff for alpha, top-lit shading for colour."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    n = fbm(size, rng, octaves=6 if wispy else 5)
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    r = np.sqrt(x * x + y * y)
+    # noise pushes the edge in and out -> irregular, billowy outline instead of a disc
+    edge = r + (n - 0.5) * 0.9
+    falloff = np.clip(1.0 - edge / 0.9, 0, 1)
+    falloff = falloff * falloff * (3 - 2 * falloff)
+    a = np.clip((n - (0.3 if wispy else 0.12)) * 2.2, 0, 1) * falloff * density
+    a = np.clip(a * 2.0, 0, 1)
+    # light from above: brighter towards the top, darker underside, plus noise detail
+    light = 0.62 + 0.28 * (-y * 0.5 + 0.5) + 0.22 * (n - 0.5)
+    light = np.clip(light, 0, 1)
+    rgb = (light * 255).astype("uint8")
+    img = np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")])
+    return Image.fromarray(img, "RGBA")
+
+
+def rain_shaft(seed, size=64):
+    """Translucent rain curtain: soft vertical streaks fading out at the top and bottom."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    cols = fbm(size, rng, octaves=3, base=8)[0]  # one row of noise -> per-column density
+    streak = np.tile(np.clip((cols - 0.35) * 2.2, 0, 1), (size, 1))
+    y = np.linspace(-1, 1, size)[:, None]
+    x = np.linspace(-1, 1, size)[None, :]
+    fade = np.clip(1 - np.abs(y) ** 3, 0, 1) * np.clip(1 - np.abs(x) ** 2, 0, 1)
+    detail = fbm(size, rng, octaves=4, base=2) * 0.6 + 0.4
+    a = np.clip(streak * fade * detail, 0, 1) * 0.8
+    rgb = np.full((size, size), 205, dtype="uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
+
+
 def write(img, name):
     os.makedirs(PARTICLES, exist_ok=True)
     img.save(os.path.join(PARTICLES, name + ".png"))
 
 
 def main():
+    # Realistic, soft 64x64 textures for the storm volume (tinted in code).
     for i in range(4):
-        write(cloud_texture(100 + i, CLOUD, lobes=4 + i % 2), f"funnel_cloud_{i}")
-        write(cloud_texture(200 + i, DUST, lobes=3, fill=0.82), f"dust_cloud_{i}")
+        write(soft_cloud(100 + i), f"funnel_cloud_{i}")
+        write(soft_cloud(200 + i, density=0.85, wispy=True), f"dust_cloud_{i}")
+        write(rain_shaft(400 + i), f"rain_shaft_{i}")
         write(debris_texture(300 + i), f"storm_debris_{i}")
 
     # 16x16 mod icon (tornado silhouette on a storm sky), upscaled with nearest neighbour for the mod list.

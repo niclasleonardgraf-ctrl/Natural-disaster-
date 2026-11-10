@@ -40,8 +40,9 @@ The Tornado (`disaster/tornado/`, `client/tornado/`) is the reference implementa
    FOV pulse. In `tick`, spawn particles (scale them by `ClientConfig.PARTICLE_DENSITY`, the vanilla particle setting,
    distance LOD and frustum culling) and play layered near/far sounds (`DisasterLoopSound`). Register it in `client/DisasterVisuals`.
 5. Sounds: add a generator to `tools/gen_sounds.py`, register it in `registry/ModRegistries`, add it to `sounds.json`, list it in `CREDITS.md`.
-6. Particles and textures: register in `ModRegistries`, generate the textures in `tools/gen_textures.py` (16x16 or 8x8,
-   vanilla palette, hard pixels), add `particles/<name>.json`, register the provider in `RealisticDisastersClient`.
+6. Particles and textures: register in `ModRegistries`, generate the textures in `tools/gen_textures.py` (realistic:
+   soft 64x64 noise-based textures with alpha, see `soft_cloud` / `rain_shaft`), add `particles/<name>.json`,
+   register the provider in `RealisticDisastersClient`. Aim for realistic and cinematic, not pixel-art (SPEC §1).
 7. Add lang keys to `en_us.json` (name, warning and onset messages, death message, subtitles, config section).
 8. GameTests in `gametest/DisasterGameTests`, each with **its own environment**: the effect happens, the
    `blockDestruction=false` toggle is respected, and the intensity-3 cost stays < 2 ms/tick. All tests must pass.

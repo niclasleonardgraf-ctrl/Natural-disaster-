@@ -31,9 +31,9 @@ import net.minecraft.world.phys.Vec3;
  * swirling funnel, debris and dust rings at the base, and a layered roar.
  */
 public final class TornadoVisual implements DisasterVisual {
-    private static final int SKY = 0x56654C;     // bruised storm green
-    private static final int FOG = 0x7C876F;   // bright, sickly horizon band under the dark base
-    private static final int CLOUDS = 0x33382F;
+    private static final int SKY = 0x4F5A55;     // slate with a hint of storm green
+    private static final int FOG = 0x828B84;   // bright horizon band under the dark base
+    private static final int CLOUDS = 0x383C3E;
 
     private static final RandomSource RANDOM = RandomSource.create();
 
@@ -103,8 +103,8 @@ public final class TornadoVisual implements DisasterVisual {
         out.fogColor(FOG, w);
         out.darken(w * (0.25f + d.intensity * 0.06f));
         // Rain haze, not a wall: the funnel must stay visible from 100+ blocks.
-        float fogEnd = 110f + (5 - d.intensity) * 20f + (float) dist * 0.6f;
-        out.fog(fogEnd, w * (d.phase == Phase.WARNING ? 0.35f : 0.6f));
+        float fogEnd = 160f + (5 - d.intensity) * 20f + (float) dist * 0.8f;
+        out.fog(fogEnd, w * (d.phase == Phase.WARNING ? 0.3f : 0.5f));
 
         float td = touchdown(d);
         float core = coreRadius(d);
@@ -165,10 +165,26 @@ public final class TornadoVisual implements DisasterVisual {
             spawnAt(level, ModRegistries.WALL_CLOUD.get(), d, 0.97f, ring * core, ring, height);
         }
 
+        // Rain curtains hanging from the cloud base on the rear flank (behind the direction of travel).
+        if (dist < 400) {
+            int rainCount = count(budget * 0.12f * Math.max(0.3f, s));
+            float hx = d.data(TornadoDisaster.D_HEADING_X), hz = d.data(TornadoDisaster.D_HEADING_Z);
+            double back = Math.atan2(-hz, -hx);
+            for (int i = 0; i < rainCount; i++) {
+                double a = back + (RANDOM.nextDouble() - 0.5) * 2.4;
+                float ring = 4f + RANDOM.nextFloat() * 7f;
+                float h = RANDOM.nextFloat() * 0.85f;
+                Vec3 base = d.pos();
+                level.addParticle(ModRegistries.RAIN_SHAFT.get(), true, true,
+                        base.x + Math.cos(a) * ring * core, base.y + h * height, base.z + Math.sin(a) * ring * core,
+                        d.id, h, ring);
+            }
+        }
+
         // Condensation funnel lowering from the cloud base.
         float bottom = (1f - td) * 0.85f;
         if (td > 0.02f || d.phase == Phase.BUILDUP) {
-            int funnelCount = count(budget * 1.4f * s);
+            int funnelCount = count(budget * 1.8f * s);
             for (int i = 0; i < funnelCount; i++) {
                 // bias toward the lower funnel, where it is thin and needs density to read as solid
                 float u = RANDOM.nextFloat();
