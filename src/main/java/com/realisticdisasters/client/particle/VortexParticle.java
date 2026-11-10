@@ -55,6 +55,7 @@ public class VortexParticle extends SingleQuadParticle {
     private float spin;
     private float radial;
     private float targetSize;
+    private float baseAlpha;
 
     protected VortexParticle(ClientLevel level, double x, double y, double z, Kind kind, int disasterId,
                              float heightFrac, float jitter, SpriteSet sprites) {
@@ -82,16 +83,16 @@ public class VortexParticle extends SingleQuadParticle {
                 lifetime = 60 + r.nextInt(60);
                 rise = 0.0015f + r.nextFloat() * 0.003f;
                 spin = 0.12f + r.nextFloat() * 0.05f;
-                shade = 0.28f + r.nextFloat() * 0.12f;
-                alpha = 0.9f + r.nextFloat() * 0.1f;
+                shade = 0.44f + r.nextFloat() * 0.12f;
+                alpha = 0.95f + r.nextFloat() * 0.05f;
                 minBlockLight = 7;
             }
             case SURFACE -> {
                 lifetime = 50 + r.nextInt(40);
                 rise = 0.002f + r.nextFloat() * 0.003f;
                 spin = 0.13f + r.nextFloat() * 0.04f;
-                shade = 0.30f + r.nextFloat() * 0.14f;
-                alpha = 0.85f + r.nextFloat() * 0.15f;
+                shade = 0.46f + r.nextFloat() * 0.14f;
+                alpha = 0.95f + r.nextFloat() * 0.05f;
                 minBlockLight = 7;
             }
             case WALL -> {
@@ -106,8 +107,10 @@ public class VortexParticle extends SingleQuadParticle {
                 spin = jitter < 3.5f ? 0.009f + r.nextFloat() * 0.005f : 0.0025f + r.nextFloat() * 0.002f;
                 // darker under the updraft near the centre, a little lighter toward the edges
                 float outer = Mth.clamp(jitter / 14f, 0f, 1f);
-                shade = jitter < 3.5f ? 0.09f + r.nextFloat() * 0.03f : (0.11f + 0.1f * outer) + r.nextFloat() * 0.04f;
-                alpha = jitter < 3.5f ? 0.9f + r.nextFloat() * 0.1f : 0.75f + r.nextFloat() * 0.25f;
+                // concentric rolls: alternating darker / lighter rings across the base
+                float band = 0.72f + 0.28f * (float) Math.sin(jitter * 2.6f);
+                shade = (jitter < 3.5f ? 0.08f + r.nextFloat() * 0.025f : (0.1f + 0.1f * outer) * band + r.nextFloat() * 0.025f);
+                alpha = (0.88f + r.nextFloat() * 0.12f) * Mth.clamp(1f - (jitter - 17f) / 11f, 0.08f, 1f);
                 minBlockLight = 2;
             }
             case BAND -> {
@@ -158,6 +161,7 @@ public class VortexParticle extends SingleQuadParticle {
         }
         setColor(baseR, baseG, baseB);
         setAlpha(alpha);
+        this.baseAlpha = alpha;
         this.quadSize = this.targetSize = 0.5f;
         this.roll = this.oRoll = kind == Kind.RAIN ? 0f : r.nextFloat() * Mth.TWO_PI;
     }
@@ -216,7 +220,7 @@ public class VortexParticle extends SingleQuadParticle {
             case SHEET -> {
                 r = core * jitter;
                 ny = c.y + TornadoVisual.cloudBaseHeight(d, jitter);
-                targetSize = jitter < 3.5f ? (7f + jitter * 1.5f) * sizeVar : (15f + jitter * 0.5f) * sizeVar;
+                targetSize = jitter < 3.5f ? (8f + jitter * 1.5f) * sizeVar : (16f + jitter * 0.6f) * sizeVar;
             }
             case BAND -> {
                 r = core * jitter;
@@ -267,17 +271,32 @@ public class VortexParticle extends SingleQuadParticle {
         float shade = 1f;
         if (kind != Kind.SHEET && kind != Kind.BAND) {
             float lit = (float) (0.5 + 0.5 * Math.cos(angle - LIGHT_ANGLE));
-            shade = 0.6f + 0.4f * lit;
+            shade = 0.5f + 0.5f * lit;   // strong side lighting: lit flank vs. shadowed flank
         }
         if (kind == Kind.CLOUD) {
             shade *= (float) (0.86 + 0.14 * Math.sin(angle * 2.0 - heightFrac * 34.0));
+        }
+        // Cloud far away would be painted bright by vanilla's render-distance fog (a glowing band across the
+        // sky). Fade it out before that, so the base dissolves into the dark sky instead.
+        if (kind == Kind.SHEET || kind == Kind.BAND) {
+            var mc = net.minecraft.client.Minecraft.getInstance();
+            double rd = mc.options.getEffectiveRenderDistance() * 16.0;
+            Vec3 cam = mc.gameRenderer.getMainCamera().position();
+            double camDist = Math.sqrt((x - cam.x) * (x - cam.x) + (z - cam.z) * (z - cam.z));
+            float t = (float) Mth.clamp((camDist - rd * 0.55) / (rd * 0.3), 0, 1);
+            setAlpha(baseAlpha * (1f - t * t * (3f - 2f * t)));
+        }
+        // In-cloud lightning lights the storm from within.
+        float flash = com.realisticdisasters.client.EffectsManager.flash();
+        if (flash > 0f && kind != Kind.DEBRIS && kind != Kind.DUST && kind != Kind.INFLOW) {
+            shade *= 1f + flash * (kind == Kind.SHEET || kind == Kind.BAND ? 3.2f : 1.8f);
         }
         if (funnel && heightFrac < 0.25f) {
             // the lower funnel picks up the brown of the debris it is ingesting
             float m = (0.25f - heightFrac) / 0.25f * 0.45f;
             setColor(Mth.lerp(m, baseR, 0.50f) * shade, Mth.lerp(m, baseG, 0.45f) * shade, Mth.lerp(m, baseB, 0.39f) * shade);
         } else {
-            setColor(baseR * shade, baseG * shade, baseB * shade);
+            setColor(Math.min(1f, baseR * shade), Math.min(1f, baseG * shade), Math.min(1f, baseB * shade));
         }
     }
 
@@ -290,8 +309,13 @@ public class VortexParticle extends SingleQuadParticle {
         switch (kind) {
             // Normal points radially outward (local +Z is the visible face); slanted into a helix.
             case SURFACE -> q.rotateY(HALF_PI - a).rotateZ(-0.5f);
-            // Horizontal, visible from below.
-            case SHEET -> q.rotateY(yaw0 + a).rotateX(HALF_PI);
+            // Horizontal, visible from below, rolls running tangentially -> concentric structure.
+            case SHEET -> q.rotateY(-(a + HALF_PI) + (yaw0 - Mth.PI) * 0.15f).rotateX(HALF_PI);
+            // Funnel silhouette: upright streak panels slanted into the helix (no round puffs).
+            case CLOUD -> {
+                FacingCameraMode.LOOKAT_Y.setRotation(q, camera, partialTick);
+                q.rotateZ(-0.35f);
+            }
             // Horizontal with the band's long axis tangential -> concentric striations.
             case BAND -> q.rotateY(-(a + HALF_PI)).rotateX(HALF_PI);
             // Curtains stay upright: turn only around the vertical axis.

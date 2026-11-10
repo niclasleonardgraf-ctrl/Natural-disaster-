@@ -1,8 +1,1 @@
-{
-  "textures": [
-    "realisticdisasters:funnel_cloud_0",
-    "realisticdisasters:funnel_cloud_1",
-    "realisticdisasters:funnel_cloud_2",
-    "realisticdisasters:funnel_cloud_3"
-  ]
-}
+{"textures":["realisticdisasters:funnel_streak_0","realisticdisasters:funnel_streak_1","realisticdisasters:funnel_streak_2","realisticdisasters:funnel_streak_3"]}

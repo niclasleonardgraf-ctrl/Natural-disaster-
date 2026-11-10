@@ -1,19 +1,98 @@
 {
   "disaster.tornado.roar": {
     "subtitle": "subtitles.realisticdisasters.tornado.roar",
-    "sounds": [{ "name": "realisticdisasters:tornado_roar", "stream": true, "attenuation_distance": 96 }]
+    "sounds": [
+      {
+        "name": "realisticdisasters:tornado_roar",
+        "stream": true,
+        "attenuation_distance": 160
+      }
+    ]
   },
   "disaster.tornado.distant": {
     "subtitle": "subtitles.realisticdisasters.tornado.distant",
-    "sounds": [{ "name": "realisticdisasters:tornado_distant", "stream": true }]
+    "sounds": [
+      {
+        "name": "realisticdisasters:tornado_distant",
+        "stream": true
+      }
+    ]
   },
   "disaster.rumble": {
     "subtitle": "subtitles.realisticdisasters.rumble",
-    "sounds": ["realisticdisasters:rumble1", "realisticdisasters:rumble2", "realisticdisasters:rumble3"]
+    "sounds": [
+      "realisticdisasters:rumble1",
+      "realisticdisasters:rumble2",
+      "realisticdisasters:rumble3"
+    ]
   },
   "disaster.wind_gust": {
     "subtitle": "subtitles.realisticdisasters.wind_gust",
-    "sounds": ["realisticdisasters:wind_gust1", "realisticdisasters:wind_gust2", "realisticdisasters:wind_gust3"]
+    "sounds": [
+      "realisticdisasters:wind_gust1",
+      "realisticdisasters:wind_gust2",
+      "realisticdisasters:wind_gust3"
+    ]
+  },
+  "disaster.tornado.core": {
+    "subtitle": "subtitles.realisticdisasters.tornado.core",
+    "sounds": [
+      {
+        "name": "realisticdisasters:tornado_core",
+        "stream": true
+      }
+    ]
+  },
+  "disaster.wind_howl": {
+    "subtitle": "subtitles.realisticdisasters.wind_howl",
+    "sounds": [
+      {
+        "name": "realisticdisasters:wind_howl",
+        "stream": true
+      }
+    ]
+  },
+  "disaster.debris_thud": {
+    "subtitle": "subtitles.realisticdisasters.debris_thud",
+    "sounds": [
+      {
+        "name": "realisticdisasters:debris_thud1",
+        "attenuation_distance": 40
+      },
+      {
+        "name": "realisticdisasters:debris_thud2",
+        "attenuation_distance": 40
+      },
+      {
+        "name": "realisticdisasters:debris_thud3",
+        "attenuation_distance": 40
+      }
+    ]
+  },
+  "disaster.wood_snap": {
+    "subtitle": "subtitles.realisticdisasters.wood_snap",
+    "sounds": [
+      {
+        "name": "realisticdisasters:wood_snap1",
+        "attenuation_distance": 64
+      },
+      {
+        "name": "realisticdisasters:wood_snap2",
+        "attenuation_distance": 64
+      },
+      {
+        "name": "realisticdisasters:wood_snap3",
+        "attenuation_distance": 64
+      }
+    ]
+  },
+  "disaster.debris_rattle": {
+    "subtitle": "subtitles.realisticdisasters.debris_rattle",
+    "sounds": [
+      "realisticdisasters:debris_rattle1",
+      "realisticdisasters:debris_rattle2",
+      "realisticdisasters:debris_rattle3"
+    ]
   },
   "disaster.blizzard.howl": {
     "subtitle": "subtitles.realisticdisasters.blizzard.howl",

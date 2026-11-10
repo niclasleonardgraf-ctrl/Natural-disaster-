@@ -6,6 +6,7 @@ import com.realisticdisasters.client.sound.DisasterLoopSound;
 import com.realisticdisasters.config.ClientConfig;
 import com.realisticdisasters.disaster.Phase;
 import com.realisticdisasters.disaster.tornado.TornadoDisaster;
+import com.realisticdisasters.disaster.tornado.TornadoWind;
 import com.realisticdisasters.registry.ModRegistries;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
@@ -31,16 +32,21 @@ import net.minecraft.world.phys.Vec3;
  * swirling funnel, debris and dust rings at the base, and a layered roar.
  */
 public final class TornadoVisual implements DisasterVisual {
-    private static final int SKY = 0x4F5A55;     // slate with a hint of storm green
-    private static final int FOG = 0x828B84;   // bright horizon band under the dark base
-    private static final int CLOUDS = 0x383C3E;
+    private static final int SKY = 0x2A302F;     // near-black storm overhead
+    private static final int FOG = 0xA7AD9E;     // bright, backlit horizon under the storm
+    private static final int CLOUDS = 0x2C3031;
 
     private static final RandomSource RANDOM = RandomSource.create();
 
     private static final class State {
-        DisasterLoopSound roar, distant;
+        DisasterLoopSound roar, distant, core, howl;
+        float shelter;
+        float localWind;
+        int nextRattle = 20;
         int nextRumble = 40;
         int nextGust = 80;
+        int nextFlash = 30;
+        int thunderIn = -1;
     }
 
     // ------------------------------------------------------------------ shape helpers (shared with particles)
@@ -107,7 +113,7 @@ public final class TornadoVisual implements DisasterVisual {
         out.sky(SKY, w);
         out.clouds(CLOUDS, w);
         out.fogColor(FOG, w);
-        out.darken(w * (0.25f + d.intensity * 0.06f));
+        out.darken(w * (0.42f + d.intensity * 0.06f));
         // Rain haze, not a wall: the funnel must stay visible from 100+ blocks.
         float fogEnd = 220f + (5 - d.intensity) * 20f + (float) dist;
         out.fog(fogEnd, w * (d.phase == Phase.WARNING ? 0.25f : 0.4f));
@@ -169,9 +175,10 @@ public final class TornadoVisual implements DisasterVisual {
             float ring = 0.3f + RANDOM.nextFloat() * 3.2f;
             spawnAt(level, ModRegistries.CLOUD_SHEET.get(), d, 0.9f, ring * core, ring, height);
         }
-        int deckSheets = count(0.9f * baseRate * (1 + d.intensity * 0.12f));
+        // Wide enough to reach the horizon from most viewpoints; the outer rings fade (no hard disc edge).
+        int deckSheets = count(2.2f * baseRate * (1 + d.intensity * 0.12f));
         for (int i = 0; i < deckSheets; i++) {
-            float ring = 3.5f + (float) Math.sqrt(RANDOM.nextFloat()) * 15f;
+            float ring = 3.5f + (float) Math.sqrt(RANDOM.nextFloat()) * 24f;
             spawnAt(level, ModRegistries.CLOUD_SHEET.get(), d, 0.95f, ring * core, ring, height);
         }
         // Rotating concentric striations in the base (the "mothership" look of a strong supercell).
@@ -182,7 +189,7 @@ public final class TornadoVisual implements DisasterVisual {
         }
         // Rain curtains hanging from the cloud base on the rear flank (behind the direction of travel).
         if (dist < 400) {
-            int rainCount = count(budget * 0.08f * Math.max(0.3f, s));
+            int rainCount = count(budget * 0.05f * Math.max(0.3f, s));
             float hx = d.data(TornadoDisaster.D_HEADING_X), hz = d.data(TornadoDisaster.D_HEADING_Z);
             double back = Math.atan2(-hz, -hx);
             for (int i = 0; i < rainCount; i++) {
@@ -199,14 +206,14 @@ public final class TornadoVisual implements DisasterVisual {
         // Condensation funnel lowering from the cloud base.
         float bottom = (1f - td) * 0.78f;
         if (td > 0.02f || d.phase == Phase.BUILDUP) {
-            int funnelCount = count(budget * 0.9f * s);
+            int funnelCount = count(budget * 1.5f * s);
             for (int i = 0; i < funnelCount; i++) {
                 // bias toward the lower funnel, where it is thin and needs density to read as solid
                 float u = RANDOM.nextFloat();
                 // stop below the flare: the soft wall cloud takes over there (crisp funnel puffs look like bubbles)
                 float h = bottom + (u * u) * (0.8f - bottom);
                 // mostly a tight outer shell (crisp edge) plus some fill
-                if (RANDOM.nextFloat() < 0.55f) {
+                if (RANDOM.nextFloat() < 0.5f) {
                     // streaked surface panels: the funnel's skin with helical striations
                     spawnAt(level, ModRegistries.FUNNEL_SURFACE.get(), d, h, funnelRadius(d, h) * 0.96, 1f, height);
                 } else {
@@ -219,7 +226,7 @@ public final class TornadoVisual implements DisasterVisual {
 
         if (td > 0.35f && dist < 300) {
             // Debris cloud at the base, flecks whipped around it, dust streamers feeding in.
-            int dustCount = count(budget * 0.35f * td);
+            int dustCount = count(budget * 0.3f * td);
             for (int i = 0; i < dustCount; i++) {
                 float jitter = RANDOM.nextFloat();
                 spawnAt(level, ModRegistries.DUST_CLOUD.get(), d, RANDOM.nextFloat() * 0.15f, core * (0.5 + 1.3 * jitter), jitter, height);
@@ -269,28 +276,90 @@ public final class TornadoVisual implements DisasterVisual {
                 d.id, h, jitter);
     }
 
+    /** The tornado's wind field, rebuilt on the client from synced data (same model the server uses). */
+    public static TornadoWind wind(ClientDisaster d) {
+        return new TornadoWind(d.pos(), coreRadius(d), height(d), d.intensity,
+                d.data(TornadoDisaster.D_HEADING_X), d.data(TornadoDisaster.D_HEADING_Z), d.data(TornadoDisaster.D_SPEED),
+                d.strength() * touchdown(d));
+    }
+
+    /**
+     * Layered sound, mixed like real recordings: a far "freight train" rumble, a mid-range roar, an overwhelming
+     * core roar when it is on top of you, a wind howl driven by the actual wind speed at your position, and debris
+     * rattling around you. Everything above the rumble is muffled when you are sheltered.
+     */
     private void tickSounds(ClientDisaster d, State st, Vec3 cam) {
         Minecraft mc = Minecraft.getInstance();
         var sounds = mc.getSoundManager();
-        if (st.roar == null || st.roar.isStopped()) {
-            // Close layer: positional roar, audible within ~100 blocks.
-            st.roar = new DisasterLoopSound(ModRegistries.TORNADO_ROAR.get(), d, true,
-                    x -> x.strength() * (0.35 + touchdown(x) * 0.65) * (2.5 + x.intensity * 0.5),
-                    x -> 0.85 + 0.05 * (5 - x.intensity));
-            sounds.play(st.roar);
-        }
+        // Shelter: under a roof / underground the high, violent layers are muffled; the low rumble comes through.
+        boolean open = mc.level != null && mc.level.canSeeSky(BlockPos.containing(cam));
+        st.shelter += ((open ? 0f : 1f) - st.shelter) * 0.1f;
+        TornadoWind wind = wind(d);
+        double localWind = wind.at(cam.x, cam.y, cam.z).length();
+        st.localWind += (float) ((localWind - st.localWind) * 0.2);
+        double vmax = TornadoWind.maxWind(d.intensity);
+
         if (st.distant == null || st.distant.isStopped()) {
-            // Distant layer: non-attenuated low rumble that fades with distance and under the roar.
             st.distant = new DisasterLoopSound(ModRegistries.TORNADO_DISTANT.get(), d, false,
                     x -> {
-                        double dist = horizontalDistance(x, Minecraft.getInstance().gameRenderer.getMainCamera().position());
-                        return x.strength() * 0.7 * (1 - smoothstep(40f, 380f, (float) dist)) * (0.5 + 0.1 * x.intensity);
+                        double dist = horizontalDistance(x, camPos());
+                        double far = 1 - smoothstep(250f, 750f, (float) dist);
+                        return x.strength() * (0.5 + 0.1 * x.intensity) * far * (1 - 0.15 * st.shelter);
                     },
-                    x -> 1.0);
+                    x -> 0.9 + 0.1 * (1 - smoothstep(60f, 400f, (float) horizontalDistance(x, camPos()))));
             sounds.play(st.distant);
+        }
+        if (st.roar == null || st.roar.isStopped()) {
+            st.roar = new DisasterLoopSound(ModRegistries.TORNADO_ROAR.get(), d, true,
+                    x -> x.strength() * (0.3 + touchdown(x) * 0.7) * (1.2 + x.intensity * 0.2) * (1 - 0.55 * st.shelter),
+                    x -> 0.85 + 0.04 * (5 - x.intensity));
+            sounds.play(st.roar);
+        }
+        if (st.core == null || st.core.isStopped()) {
+            st.core = new DisasterLoopSound(ModRegistries.TORNADO_CORE.get(), d, false,
+                    x -> {
+                        double dist = horizontalDistance(x, camPos());
+                        float rc = coreRadius(x);
+                        double near = 1 - smoothstep(rc * 1.2f, rc * 5.5f, (float) dist);
+                        return x.strength() * touchdown(x) * near * (0.7 + 0.08 * x.intensity) * (1 - 0.7 * st.shelter);
+                    },
+                    x -> 0.9 + 0.1 * Math.min(1, st.localWind / vmax));
+            sounds.play(st.core);
+        }
+        if (st.howl == null || st.howl.isStopped()) {
+            st.howl = new DisasterLoopSound(ModRegistries.WIND_HOWL.get(), d, false,
+                    x -> Math.min(1.0, st.localWind / (vmax * 0.55)) * 0.85 * (1 - 0.75 * st.shelter),
+                    x -> 0.7 + 0.55 * Math.min(1.0, st.localWind / vmax));
+            sounds.play(st.howl);
+        }
+
+        // Debris pelting the surroundings when you are in the wind field.
+        double ratio = st.localWind / vmax;
+        if (ratio > 0.25 && --st.nextRattle <= 0) {
+            st.nextRattle = 6 + RANDOM.nextInt(Math.max(4, (int) (30 * (1 - ratio))));
+            double a = RANDOM.nextDouble() * Math.PI * 2;
+            double r = 3 + RANDOM.nextDouble() * 8;
+            sounds.play(new SimpleSoundInstance(ModRegistries.DEBRIS_RATTLE.get().location(), SoundSource.WEATHER,
+                    (float) Math.min(1.0, ratio) * (1 - 0.6f * st.shelter), 0.85f + RANDOM.nextFloat() * 0.3f, RANDOM, false, 0,
+                    SoundInstance.Attenuation.LINEAR, cam.x + Math.cos(a) * r, cam.y + RANDOM.nextDouble() * 3, cam.z + Math.sin(a) * r, false));
         }
 
         double dist = horizontalDistance(d, cam);
+        // In-cloud lightning: the base flickers, thunder follows after the sound's travel time.
+        if ((d.phase == Phase.BUILDUP || d.phase == Phase.PEAK) && d.strength() > 0.3f && --st.nextFlash <= 0) {
+            st.nextFlash = 50 + RANDOM.nextInt(Math.max(20, 200 - d.intensity * 25));
+            float near = 1f - smoothstep(60f, 500f, (float) dist);
+            EffectsManager.triggerFlash((0.45f + 0.55f * RANDOM.nextFloat()) * near * d.strength());
+            st.thunderIn = 2 + (int) (dist / 17.0);   // ~343 m/s
+        }
+        if (st.thunderIn > 0 && --st.thunderIn == 0) {
+            float loud = 1f - smoothstep(20f, 400f, (float) dist);
+            Vec3 dir = d.pos().subtract(cam);
+            Vec3 at = cam.add(dir.normalize().scale(Math.min(dir.length(), 16)));
+            sounds.play(new SimpleSoundInstance(ModRegistries.DISTANT_RUMBLE.get().location(), SoundSource.WEATHER,
+                    0.6f + loud * 0.9f, 0.75f + loud * 0.35f + RANDOM.nextFloat() * 0.1f, RANDOM, false, 0,
+                    SoundInstance.Attenuation.NONE, at.x, at.y, at.z, false));
+        }
         // Warning signs: distant thunder-like rumbles while the storm organises.
         if (d.phase == Phase.WARNING || d.phase == Phase.BUILDUP) {
             if (--st.nextRumble <= 0) {
@@ -312,11 +381,17 @@ public final class TornadoVisual implements DisasterVisual {
         }
     }
 
+    private static Vec3 camPos() {
+        return Minecraft.getInstance().gameRenderer.getMainCamera().position();
+    }
+
     @Override
     public void onRemoved(ClientDisaster d) {
         if (d.visualState instanceof State st) {
             if (st.roar != null) st.roar.end();
             if (st.distant != null) st.distant.end();
+            if (st.core != null) st.core.end();
+            if (st.howl != null) st.howl.end();
         }
     }
 
