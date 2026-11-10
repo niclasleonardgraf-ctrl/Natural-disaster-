@@ -127,12 +127,64 @@ Implementation notes: oriented quads come from overriding `VortexParticle#extrac
 large particles by their real size (vanilla culls by centre point). All quad particles share vanilla's
 16384-particle queue, so the spawn budget keeps the storm around 11k particles.
 
+### 3D funnel mesh
+The funnel is real 3D geometry, generated in code every frame (`client/tornado/FunnelRenderer`). Nested tube meshes
+(about 44 rings × 64 segments each) follow the snaking, tilted funnel axis:
+1. an opaque condensation core
+2. a streaky outer shell
+3. a faint outer veil
+4. a dust sheath at the ground
+
+Each layer scrolls its texture around the funnel (rotation from the wind model's angular speed) and upward (rising
+air), with a slight helical slant for striations. The mesh has an irregular, living outline, strong side lighting
+(bright lit flank, dark shadow flank), soft silhouettes, and reacts to lightning. Up close it fades into dark,
+debris-laden murk, because inside a tornado you cannot see a funnel wall. Textures are seamless 256×512 / 256×256
+procedural PNGs with smooth filtering (`.mcmeta` blur).
+
+It is submitted through NeoForge's `SubmitCustomGeometryEvent` into vanilla's translucent entity pipeline, so fog,
+lightmap and shader packs handle it like other world geometry. `meshFunnel = false` in the client config switches back
+to the particle-only funnel (e.g. if a shader pack misbehaves).
+
+### Tornado physics
+One wind model (`disaster/tornado/TornadoWind`) drives everything, on the server and on the client:
+- **Wind field:** wind speed rises to a peak at the core radius and falls off outside it (a Rankine vortex). Air
+  flows in along the ground and up through the core, and the storm's forward motion adds on top, so the right flank
+  of the track has the strongest winds. Peak speed scales with intensity, mirroring the EF scale.
+- **Objects:** everything is moved by aerodynamic drag on the wind/object speed difference, scaled by the object's
+  surface area per unit of mass. Items and small animals fly; iron golems barely move; crouching lowers your profile;
+  water shields you.
+- **Shelter:** under a roof the wind is cut down according to how enclosed the spot is. Underground or in a closed
+  room almost nothing gets through, until the roof is torn off.
+- **Impacts:** hitting a wall at speed hurts (like flying into a wall with elytra). Paintings and item frames are torn
+  off the walls.
+- **Blocks:** whether a block fails depends on the local wind speed versus its material's wind resistance, scaled by
+  how many faces are exposed. Roofs, walls and tree crowns fail first; buried blocks are safe. Plants are shredded,
+  glass shatters, turf is scoured into a damage path, trunks snap (the part above flies, a stump stays), and wood and
+  stone are torn out as debris at higher intensities.
+- **Debris:** thrown blocks are projectiles with material-dependent drag. They smash through glass, leaves and
+  plants, hit creatures in mid-air (damage from speed and mass), and land with the block's own break sound plus a
+  heavy thud.
+
+### Tornado sound design
+Layers cross-fade with distance, like real recordings:
+- a far "freight train" rumble (50–300 Hz with a slow rhythmic chug)
+- a mid-range rushing roar
+- an overwhelming core roar right next to the vortex
+- a wind howl driven by the real wind speed at your position (its pitch rises with the wind)
+- debris rattling around you, trees snapping and debris crashing where it actually happens
+- thunder after in-cloud lightning, delayed by distance
+
+Sheltering muffles the high, violent layers while the low rumble comes through. All sounds are original and
+synthesized by `tools/gen_sounds.py`.
+
 ## Automated tests
 
 `./gradlew runGameTestServer`. These run on a dedicated-server dist, so they also check that no client-only code loads on a server:
 - `tornado_damages_terrain`: a pig gets lifted and the turf is scoured
 - `tornado_respects_block_toggle`: with `blockDestruction=false` no blocks change
-- `tornado_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.23 ms)
+- `tornado_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.2–0.3 ms)
+- `tornado_shelter_protects`: an animal in a sealed bunker stays put while an exposed one is lifted
+- `tornado_breaks_glass_and_snaps_trees`: glass shatters and a trunk snaps, leaving a stump
 - `earthquake_fissures_and_crumbling`: fissures open the ground, the house and overhang crumble into falling-block debris, stone bricks crack
 - `earthquake_respects_block_toggle`: with `blockDestruction=false` no blocks change and no debris spawns
 - `earthquake_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.2–0.3 ms)

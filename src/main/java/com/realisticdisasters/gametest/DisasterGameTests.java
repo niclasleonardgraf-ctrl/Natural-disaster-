@@ -37,6 +37,12 @@ public final class DisasterGameTests {
         FUNCTIONS.register("tornado_damages_terrain", () -> DisasterGameTests::tornadoDamagesTerrain);
         FUNCTIONS.register("tornado_respects_block_toggle", () -> DisasterGameTests::tornadoRespectsBlockToggle);
         FUNCTIONS.register("tornado_intensity3_tick_cost", () -> DisasterGameTests::tornadoTickCost);
+        FUNCTIONS.register("tornado_shelter_protects", () -> DisasterGameTests::tornadoShelterProtects);
+        FUNCTIONS.register("tornado_breaks_glass_and_snaps_trees", () -> DisasterGameTests::tornadoBreaksGlassAndSnapsTrees);
+    }
+
+    public static void register(IEventBus modBus) {
+        FUNCTIONS.register(modBus);
         FUNCTIONS.register("earthquake_fissures_and_crumbling", () -> DisasterGameTests::earthquakeFissuresAndCrumbling);
         FUNCTIONS.register("earthquake_respects_block_toggle", () -> DisasterGameTests::earthquakeRespectsBlockToggle);
         FUNCTIONS.register("earthquake_intensity3_tick_cost", () -> DisasterGameTests::earthquakeTickCost);
@@ -44,10 +50,6 @@ public final class DisasterGameTests {
         FUNCTIONS.register("earthquake_tower_topples", () -> DisasterGameTests::earthquakeTowerTopples);
         FUNCTIONS.register("earthquake_fixtures_react", () -> DisasterGameTests::earthquakeFixturesReact);
         FUNCTIONS.register("earthquake_minor_spares_houses", () -> DisasterGameTests::earthquakeMinorSparesHouses);
-    }
-
-    public static void register(IEventBus modBus) {
-        FUNCTIONS.register(modBus);
         modBus.addListener(DisasterGameTests::registerTests);
     }
 
@@ -56,6 +58,8 @@ public final class DisasterGameTests {
         add(event, "tornado_damages_terrain", event.registerEnvironment(ModRegistries.id("env_terrain")), 500);
         add(event, "tornado_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_toggle")), 300);
         add(event, "tornado_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_perf")), 400);
+        add(event, "tornado_shelter_protects", event.registerEnvironment(ModRegistries.id("env_shelter")), 300);
+        add(event, "tornado_breaks_glass_and_snaps_trees", event.registerEnvironment(ModRegistries.id("env_materials")), 400);
         add(event, "earthquake_fissures_and_crumbling", event.registerEnvironment(ModRegistries.id("env_quake_damage")), 700, "earthquake_arena");
         add(event, "earthquake_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_quake_toggle")), 300, "earthquake_arena");
         add(event, "earthquake_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_quake_perf")), 400, "earthquake_arena");
@@ -160,6 +164,46 @@ public final class DisasterGameTests {
             RealisticDisasters.LOGGER.info("Tornado intensity 3 average server cost: {} ms/tick", String.format("%.3f", cost));
             helper.assertTrue(cost < 2.0, "tornado too expensive: " + cost + " ms/tick");
             helper.succeed();
+        });
+    }
+
+    /** Shelter physics: a sealed bunker keeps its occupant on the ground while an exposed animal gets lifted. */
+    private static void tornadoShelterProtects(GameTestHelper helper) {
+        // obsidian bunker (wind can't break it) around (16,4,12); the pig stands inside
+        for (int x = 15; x <= 17; x++)
+            for (int y = 4; y <= 6; y++)
+                for (int z = 11; z <= 13; z++)
+                    if (!(x == 16 && z == 12 && y <= 5)) helper.setBlock(new BlockPos(x, y, z), Blocks.OBSIDIAN);
+        Pig sheltered = helper.spawn(EntityType.PIG, new BlockPos(16, 4, 12));
+        Pig exposed = helper.spawn(EntityType.PIG, new BlockPos(19, 4, 16));
+        Vec3 start = sheltered.position();
+        double startY = exposed.getY();
+        double[] lift = {0};
+        helper.onEachTick(() -> lift[0] = Math.max(lift[0], exposed.getY() - startY));
+        Disaster tornado = startPeakTornado(helper, 4);
+        helper.runAfterDelay(160, () -> {
+            double moved = sheltered.position().distanceTo(start);
+            DisasterManager.stop(helper.getLevel(), tornado.id(), false);
+            helper.assertTrue(lift[0] > 2.0, "exposed pig was not lifted (" + lift[0] + ")");
+            helper.assertTrue(moved < 1.0, "sheltered pig was moved " + moved + " blocks");
+            helper.succeed();
+        });
+    }
+
+    /** Material failure: glass shatters and a tree trunk snaps near the funnel (leaving a stump). */
+    private static void tornadoBreaksGlassAndSnapsTrees(GameTestHelper helper) {
+        BlockPos glass = new BlockPos(18, 4, 18);
+        helper.setBlock(glass, Blocks.GLASS);
+        for (int y = 4; y <= 8; y++) helper.setBlock(new BlockPos(14, y, 17), Blocks.OAK_LOG);
+        Disaster tornado = startPeakTornado(helper, 4);
+        helper.succeedWhen(() -> {
+            helper.assertTrue(!helper.getLevel().getBlockState(helper.absolutePos(glass)).is(Blocks.GLASS), "glass still intact");
+            int logs = 0;
+            for (int y = 4; y <= 8; y++) if (helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(14, y, 17))).is(Blocks.OAK_LOG)) logs++;
+            // A snapped trunk leaves a stump: the top must be gone, the stump may stay.
+            helper.assertTrue(!helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(14, 8, 17))).is(Blocks.OAK_LOG)
+                    && logs <= 3, "trunk not snapped (" + logs + " logs left)");
+            DisasterManager.stop(helper.getLevel(), tornado.id(), false);
         });
     }
 

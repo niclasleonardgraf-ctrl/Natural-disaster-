@@ -451,9 +451,10 @@ public final class EarthquakeVisual implements DisasterVisual {
             st.nextRumble = 120 + RANDOM.nextInt(160);
             Vec3 dir = d.pos().subtract(cam);
             Vec3 at = cam.add(dir.lengthSqr() < 1 ? Vec3.ZERO : dir.normalize().scale(Math.min(dir.length(), 24)));
-            sounds.play(new SimpleSoundInstance(ModRegistries.DISTANT_RUMBLE.get().location(), SoundSource.WEATHER,
-                    0.4f + 0.3f * d.strength() / 0.2f, 0.55f + RANDOM.nextFloat() * 0.2f, RANDOM, false, 0,
-                    SoundInstance.Attenuation.NONE, at.x, at.y, at.z, false));
+            // Foreshocks: a muffled boom from below (the shared distant rumble is thunder, which doesn't belong here).
+            sounds.play(new SimpleSoundInstance(ModRegistries.QUAKE_BOOM.get().location(), SoundSource.WEATHER,
+                    0.2f + 0.25f * d.strength() / 0.2f, 0.7f + RANDOM.nextFloat() * 0.25f, RANDOM, false, 0,
+                    SoundInstance.Attenuation.NONE, at.x, at.y - 4, at.z, false));
         }
         // Cracking rock where fissures tear open.
         float cracking = d.data(EarthquakeDisaster.D_CRACKING);
