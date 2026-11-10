@@ -68,7 +68,7 @@ public class TsunamiDisaster extends Disaster {
     /** Share of the peak used by the run-up; the flood then holds. */
     private static final float RUNUP = 0.45f;
 
-    private final float halfWidth, reach, seaDist, crestMax, floodHeight, drawDist, maxHardness;
+    private final float halfWidth, reach, seaDist, crestMax, floodHeight, drawDist;
     private final int drawDepth, maxWater, aftermathTicks;
     private double dirX, dirZ; // unit vector from the shore toward the sea
     private int waterY;        // y of the sea's surface block
@@ -89,7 +89,8 @@ public class TsunamiDisaster extends Disaster {
     private int drawIndex, restoreIndex, floodIndex;
     private boolean drawbackOver, receding;
     private int recedeRate = 8;
-    private float front;
+    private float front, prevFront, frontSpeed, prevSurge, surgeSpeed;
+    private final FloodDebris debris;
     private AABB region;
 
     /** A column or block in the local frame. */
@@ -98,13 +99,15 @@ public class TsunamiDisaster extends Disaster {
     /** A flooded column: water is added from {@code filled + 1} up to the rising target over time. */
     private static final class FloodCol {
         final int x, z, start, full;
+        final float force;
         int filled;
 
-        FloodCol(int x, int z, int start, int full) {
+        FloodCol(int x, int z, int start, int full, float force) {
             this.x = x;
             this.z = z;
             this.start = start;
             this.full = full;
+            this.force = force;
             this.filled = start - 1;
         }
     }
@@ -124,11 +127,12 @@ public class TsunamiDisaster extends Disaster {
         this.floodHeight = 2 + i;               // 3 .. 7 blocks of water at the shore
         this.drawDist = 14 + 4 * i;             // 18 .. 34 blocks of seabed exposed
         this.drawDepth = 1 + i / 2;             // 1 .. 3 layers
-        this.maxHardness = 0.2f + 0.45f * i;    // plants & leaves .. wool, fences, glass panes
         this.maxWater = DisasterConfig.TSUNAMI_MAX_WATER_BLOCKS.getAsInt();
         locateShore();
         this.front = -seaDist;
         this.floodStart = hasSea ? 0f : -seaDist;
+        this.prevFront = front;
+        this.debris = new FloodDebris(this, level, random, 12 + 8 * i);
 
         double scale = DisasterConfig.TSUNAMI_DURATION_SCALE.get();
         setDuration(Phase.WARNING, (int) (600 * scale));
@@ -237,6 +241,52 @@ public class TsunamiDisaster extends Disaster {
             }
             case AFTERMATH -> reach * (1f - p);
         };
+        frontSpeed = Math.max(0f, front - prevFront);
+        prevFront = front;
+        float sf = surgeFront();
+        surgeSpeed = Math.max(0f, sf - prevSurge);
+        prevSurge = sf;
+    }
+
+    /**
+     * Force of the flow on whatever stands in it at this distance inland (see {@link FloodForces}): momentum flux,
+     * i.e. depth x velocity^2, strongest where the bore first hits the coast and fading as it spreads inland.
+     */
+    private float flowForce(float axial) {
+        float inland = Mth.clamp((axial - floodStart) / (reach - floodStart), 0f, 1f);
+        return (0.6f + 0.55f * intensity) * (float) Math.pow(1f - inland, 0.6);
+    }
+
+    /**
+     * Depth-averaged current at a point (blocks/tick, horizontal). The bore drives water inland at about its own
+     * speed, slowing behind it; at high water it goes slack; the second surge pushes again; then the backwash pours
+     * back out to sea, fastest early on and near the shore.
+     */
+    public Vec3 flowAt(double x, double z) {
+        double a = axialOf(x, z);
+        if (Math.abs(lateralOf(x, z)) > halfWidth + 4 || a > reach + 4) return Vec3.ZERO;
+        double u = 0; // + = inland
+        switch (phase()) {
+            case WARNING -> u = a < 0 && a > -drawDist * 1.5 ? -0.03 * drawback() : 0;
+            case BUILDUP, PEAK -> {
+                u = bore(a, front, frontSpeed, wall());
+                u = Math.max(u, bore(a, surgeFront(), surgeSpeed, surgeWall()));
+                if (phase() == Phase.PEAK && a < front && u < 0.02) u = 0.02; // slack, still creeping inland
+            }
+            case AFTERMATH -> {
+                double p = phaseProgress();
+                double nearShore = 0.6 + 0.4 * (1 - Mth.clamp(a / reach, 0, 1));
+                u = a < reach ? -(0.12 + 0.035 * intensity) * Math.pow(1 - p, 0.6) * nearShore : 0;
+            }
+        }
+        return new Vec3(-dirX * u, 0, -dirZ * u);
+    }
+
+    private static double bore(double a, float front, float speed, float wall) {
+        if (wall <= 0.02f || a > front + 1.5) return 0;
+        double behind = front - a;
+        double drive = speed * 1.2 + 0.08;
+        return behind < 14 ? drive * wall * (1 - behind / 22) : drive * wall * 0.35;
     }
 
     @Override
@@ -334,6 +384,7 @@ public class TsunamiDisaster extends Disaster {
     @Override
     protected void onEnd() {
         if (!receding) startRecession();
+        debris.finish();
         clearFloodTicks();
         // Hand everything still outstanding to the shared queue (it outlives this disaster).
         BlockChangeQueue queue = DisasterManager.blockQueue(level);
@@ -364,13 +415,14 @@ public class TsunamiDisaster extends Disaster {
             case AFTERMATH -> {}
         }
         // Keep the flood static: water's fluid tick delay is 5, so clearing every 2 ticks means none ever fires.
-        if (age() % 2 == 0 && (phase() == Phase.PEAK || phase() == Phase.AFTERMATH)) clearFloodTicks();
+        if (age() % 2 == 0 && phase() != Phase.WARNING) clearFloodTicks();
+        debris.tick();
         feedQueue();
 
         if (age() % 20 == 0 && (phase() != Phase.AFTERMATH)) alertMobs();
         if (wall() > 0.05f) pushAtFront(front, wall());
         if (surgeWall() > 0.05f) pushAtFront(surgeFront(), surgeWall());
-        if (age() % 4 == 0 && (phase() == Phase.PEAK || phase() == Phase.AFTERMATH)) applyCurrent();
+        if (phase() != Phase.WARNING) applyFlow();
     }
 
     /** Moves this tsunami's work into the shared queue without flooding it: the queue's budget then spreads it over ticks. */
@@ -479,17 +531,35 @@ public class TsunamiDisaster extends Disaster {
         int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
         int start;
         if (top < surface) {
+            // Open to the sky below the flood line. Anything standing on the ground (walls, fences, glass, a hut)
+            // is inside the water column and takes the flow's force; ground and masonry stop the scan.
+            float force = flowForce(col.axial());
+            int tree = level.getBlockState(new BlockPos(x, top, z)).is(net.minecraft.tags.BlockTags.LOGS) ? uproot(x, z, top, force) : NOT_A_TREE;
+            if (tree == UPROOTED) return;
             start = top + 1;
-            erode(new BlockPos(x, top, z), col.axial());
+            while (start - 1 > waterY && surface - start < floodHeight + 2) {
+                BlockState below = level.getBlockState(new BlockPos(x, start - 1, z));
+                if (FloodForces.resistance(below) == FloodForces.HOLDS) break;
+                if (tree == HELD && below.is(net.minecraft.tags.BlockTags.LOGS)) break; // an anchored trunk stands
+                start--;
+            }
+            if (start == top + 1) erode(new BlockPos(x, top, z), col.axial());
         } else {
-            // Covered column (roof, overhang, tree, hillside): flood only an open space at the water line, e.g. a house.
-            if (!floodable(level.getBlockState(new BlockPos(x, surface, z)))) return;
+            // Covered column (roof, wall, tree, hillside). Trees in the run-up zone may be ripped out whole; walls the
+            // flow can break are hit; otherwise only an open space at the water line floods (e.g. inside a house).
+            float force = flowForce(col.axial());
+            BlockState atSurface = level.getBlockState(new BlockPos(x, surface, z));
+            if (atSurface.is(net.minecraft.tags.BlockTags.LOGS) && uproot(x, z, surface, force) != NOT_A_TREE) return;
+            if (!floodable(atSurface) && !fails(atSurface, force * 1.3f)) return;
             start = surface;
-            while (start - 1 > waterY && surface - start < floodHeight + 2
-                    && floodable(level.getBlockState(new BlockPos(x, start - 1, z)))) start--;
+            while (start - 1 > waterY && surface - start < floodHeight + 2) {
+                BlockState below = level.getBlockState(new BlockPos(x, start - 1, z));
+                if (!floodable(below) && !fails(below, force * 1.3f)) break;
+                start--;
+            }
         }
         if (surface - start + 1 > floodHeight + 3) return; // a deep pit or the edge of the world: leave it
-        FloodCol fc = new FloodCol(x, z, start, surface);
+        FloodCol fc = new FloodCol(x, z, start, surface, flowForce(col.axial()));
         wet.add(fc);
         raise(fc);
     }
@@ -497,9 +567,11 @@ public class TsunamiDisaster extends Disaster {
     private void raise(FloodCol c) {
         int target = Math.max(c.start, waterY + Math.round((c.full - waterY) * rise()));
         target = Math.min(target, c.full);
+        // The bore hits with full force; water that rises later only pushes gently.
+        float force = c.filled < c.start ? c.force : c.force * 0.35f;
         for (int y = c.filled + 1; y <= target; y++) {
             BlockPos bp = new BlockPos(c.x, y, c.z);
-            pending.add(l -> placeWater(bp));
+            pending.add(l -> placeWater(bp, force));
         }
         c.filled = Math.max(c.filled, target);
     }
@@ -530,19 +602,19 @@ public class TsunamiDisaster extends Disaster {
         });
     }
 
-    private void placeWater(BlockPos bp) {
+    private boolean fails(BlockState st, float force) {
+        float r = FloodForces.resistance(st);
+        return r == 0f || r != FloodForces.HOLDS && force * (0.6f + 0.8f * random.nextFloat()) > r;
+    }
+
+    private void placeWater(BlockPos bp, float force) {
         if (isFinished() || receding || placed.size() >= maxWater) return;
         BlockState st = level.getBlockState(bp);
         if (!st.isAir()) {
             if (!st.getFluidState().isEmpty() || st.hasBlockEntity()) return; // existing water is never touched
-            float hardness = st.getDestroySpeed(level, bp);
-            boolean weak = st.canBeReplaced() || hardness >= 0 && hardness <= maxHardness && !st.blocksMotion()
-                    || st.is(net.minecraft.tags.BlockTags.LEAVES) || smashesWood(st, bp);
-            if (!weak) return;
+            if (!fails(st, force)) return;
             if (!DisasterProtection.canModify(level, bp, st)) return;
-            // Smashed by the wave: break effect + drops (floating debris), then the water takes its place.
-            level.levelEvent(2001, bp, Block.getId(st));
-            if (random.nextFloat() < 0.6f) Block.dropResources(st, level, bp);
+            smash(bp, st);
         } else if (!DisasterProtection.canModify(level, bp, st)) {
             return;
         }
@@ -558,15 +630,68 @@ public class TsunamiDisaster extends Disaster {
         else floodBox.encapsulate(bp);
     }
 
-    /** Strong tsunamis tear wooden buildings apart near the coast; the pieces become floating debris. */
-    private boolean smashesWood(BlockState st, BlockPos bp) {
-        if (intensity < 3 || st.hasBlockEntity()) return false;
-        boolean wood = st.is(net.minecraft.tags.BlockTags.PLANKS) || st.is(net.minecraft.tags.BlockTags.LOGS)
-                || st.is(net.minecraft.tags.BlockTags.WOODEN_FENCES) || st.is(net.minecraft.tags.BlockTags.WOOL)
-                || st.is(net.minecraft.tags.BlockTags.WOODEN_SLABS) || st.is(net.minecraft.tags.BlockTags.WOODEN_STAIRS);
-        if (!wood) return false;
-        float near = 1f - (float) Mth.clamp(axialOf(bp.getX() + 0.5, bp.getZ() + 0.5) / reach, 0, 1);
-        return random.nextFloat() < 0.3f * (intensity - 2) * near;
+    /**
+     * A block gives way to the water: timber and leaves float off as wreckage, glass shatters, the rest breaks up
+     * into drops. A normal block break, so attached things (torches, door halves) come down with it; the resulting
+     * neighbour updates can't make the flood flow because its fluid ticks are cleared.
+     */
+    private void smash(BlockPos bp, BlockState st) {
+        Vec3 flow = flowAt(bp.getX() + 0.5, bp.getZ() + 0.5);
+        if (FloodForces.floats(st) && !st.is(net.minecraft.tags.BlockTags.LEAVES) && random.nextFloat() < 0.35f) {
+            level.playSound(null, bp, ModRegistries.WOOD_SNAP.get(), net.minecraft.sounds.SoundSource.BLOCKS,
+                    1.2f, 0.8f + random.nextFloat() * 0.4f);
+        }
+        if (FloodForces.floats(st) && !debris.full() && random.nextFloat() < 0.5f) {
+            level.levelEvent(2001, bp, Block.getId(st));
+            level.removeBlock(bp, false);
+            debris.spawn(st, Vec3.atCenterOf(bp), flow.add(0, 0.15, 0));
+        } else {
+            level.destroyBlock(bp, random.nextFloat() < 0.6f);
+        }
+    }
+
+    /**
+     * A tree standing in the bore's path is torn out by the roots when the force beats its resistance: its leaves and
+     * trunk are stripped, a few big pieces float off, and the column floods.
+     */
+    private static final int NOT_A_TREE = 0, HELD = 1, UPROOTED = 2;
+
+    private int uproot(int x, int z, int top, float force) {
+        int base = top;
+        while (base - 1 > waterY && level.getBlockState(new BlockPos(x, base - 1, z)).is(net.minecraft.tags.BlockTags.LOGS)) base--;
+        if (base > waterY + floodHeight) return NOT_A_TREE; // trunk base above the water: not in the flow
+        BlockPos trunk = new BlockPos(x, base, z);
+        List<BlockPos> parts = FloodForces.tree(level, trunk, 90);
+        long leaves = parts.stream().filter(bp -> level.getBlockState(bp).is(net.minecraft.tags.BlockTags.LEAVES)).count();
+        if (leaves < 4) return NOT_A_TREE; // log walls (cabins) are not trees: they are handled as walls
+        // The whole tree resists as one, anchored by its roots: little randomness, force decides.
+        if (force * (0.85f + 0.3f * random.nextFloat()) < 2.5f) return HELD;
+        if (!DisasterProtection.canModify(level, trunk, level.getBlockState(trunk))) return HELD;
+        Vec3 flow = flowAt(x + 0.5, z + 0.5);
+        level.playSound(null, trunk, ModRegistries.WOOD_SNAP.get(), net.minecraft.sounds.SoundSource.BLOCKS, 2.2f, 0.65f);
+        for (int k = 0; k < parts.size(); k++) {
+            BlockPos bp = parts.get(k);
+            boolean floatOff = k == 0 || k == parts.size() / 3 || k == parts.size() - 1;
+            pending.add(l -> {
+                if (isFinished() || receding) return;
+                BlockState st = level.getBlockState(bp);
+                if (!(st.is(net.minecraft.tags.BlockTags.LOGS) || st.is(net.minecraft.tags.BlockTags.LEAVES))) return;
+                if (!DisasterProtection.canModify(level, bp, st)) return;
+                if (floatOff && debris.spawn(st, Vec3.atCenterOf(bp), flow.add(0, 0.2, 0))) {
+                    level.levelEvent(2001, bp, Block.getId(st));
+                    level.setBlock(bp, Blocks.AIR.defaultBlockState(), STATIC_FLAGS);
+                } else {
+                    level.destroyBlock(bp, random.nextFloat() < 0.15f);
+                }
+            });
+        }
+        int surface = floodSurface((float) axialOf(x + 0.5, z + 0.5), (float) lateralOf(x + 0.5, z + 0.5));
+        if (surface >= base) {
+            FloodCol fc = new FloodCol(x, z, base, surface, force);
+            wet.add(fc);
+            raise(fc);
+        }
+        return UPROOTED;
     }
 
     // ------------------------------------------------------------------ recession
@@ -742,17 +867,23 @@ public class TsunamiDisaster extends Disaster {
         }
     }
 
-    /** Behind the front: an inland current while flooding, a seaward backwash while it drains. */
-    private void applyCurrent() {
-        boolean back = phase() == Phase.AFTERMATH;
-        double speed = (back ? 0.05 : 0.035) * strength() * (0.6 + intensity * 0.1);
-        if (speed < 0.003) return;
-        double sign = back ? 1 : -1;
+    /**
+     * Drag: anything in the water is pulled toward the local current, F = k * (u_flow - v). Light things (items,
+     * boats, mobs that can't swim well) go with the flow; players can wade against slack water but not the surge or
+     * the backwash. Vanilla buoyancy and drowning still apply.
+     */
+    private void applyFlow() {
         for (Entity e : level.getEntities((Entity) null, region(), e -> !e.isSpectator() && e.isInWater())) {
-            if (skip(e)) continue;
-            double ax = axialOf(e.getX(), e.getZ());
-            if (ax > Math.max(front, back ? reach : front) || ax < -drawDist || Math.abs(lateralOf(e.getX(), e.getZ())) > halfWidth) continue;
-            e.setDeltaMovement(e.getDeltaMovement().add(dirX * speed * sign, 0, dirZ * speed * sign));
+            if (skip(e) || e instanceof net.minecraft.world.entity.Display) continue;
+            Vec3 u = flowAt(e.getX(), e.getZ());
+            if (u == Vec3.ZERO) continue;
+            double k;
+            if (e instanceof net.minecraft.world.entity.item.ItemEntity || e instanceof net.minecraft.world.entity.vehicle.boat.AbstractBoat) k = 0.3;
+            else if (e instanceof Player) k = 0.07;
+            else if (e instanceof LivingEntity le) k = 0.13 * (1 - Mth.clamp(le.getAttributeValue(Attributes.KNOCKBACK_RESISTANCE), 0, 1));
+            else k = 0.2;
+            Vec3 v = e.getDeltaMovement();
+            e.setDeltaMovement(v.add((u.x - v.x) * k, 0, (u.z - v.z) * k));
             e.hurtMarked = true;
         }
     }
@@ -775,10 +906,22 @@ public class TsunamiDisaster extends Disaster {
             if (mob.isLeashed() || mob.isPassenger()) continue;
             double ax = axialOf(mob.getX(), mob.getZ());
             if (ax > reach + 16) continue;
-            double run = 14 + random.nextInt(10);
-            double tx = mob.getX() - dirX * run + (random.nextDouble() - 0.5) * 6;
-            double tz = mob.getZ() - dirZ * run + (random.nextDouble() - 0.5) * 6;
-            mob.getNavigation().moveTo(tx, mob.getY(), tz, phase() == Phase.WARNING ? 1.25 : 1.7);
+            // Head for the highest ground among a few spots inland.
+            double bx = mob.getX() - dirX * 16, bz = mob.getZ() - dirZ * 16;
+            int best = Integer.MIN_VALUE;
+            for (int k = 0; k < 5; k++) {
+                double run = 12 + random.nextInt(16);
+                double tx = mob.getX() - dirX * run + (random.nextDouble() - 0.5) * 20;
+                double tz = mob.getZ() - dirZ * run + (random.nextDouble() - 0.5) * 20;
+                if (!level.isLoaded(BlockPos.containing(tx, 0, tz))) continue;
+                int h = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, Mth.floor(tx), Mth.floor(tz));
+                if (h > best) {
+                    best = h;
+                    bx = tx;
+                    bz = tz;
+                }
+            }
+            mob.getNavigation().moveTo(bx, best == Integer.MIN_VALUE ? mob.getY() : best, bz, phase() == Phase.WARNING ? 1.25 : 1.7);
         }
     }
 
@@ -816,6 +959,10 @@ public class TsunamiDisaster extends Disaster {
 
     public double seaDirZ() {
         return dirZ;
+    }
+
+    public int debrisCount() {
+        return debris.size();
     }
 
     public float front() {

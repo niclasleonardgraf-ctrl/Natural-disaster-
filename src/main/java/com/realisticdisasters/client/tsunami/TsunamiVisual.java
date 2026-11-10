@@ -39,6 +39,7 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class TsunamiVisual implements DisasterVisual {
     private static final int HAZE = 0xC4CDD0;        // spray haze near the front
+    private static final int GRADE_SKY = 0x8FA6B2;   // cooler, deeper sky: a restrained cinematic grade
     private static final int FOAM_SEA = 0xFFFFFF;    // aerated white water at sea
     private static final int FOAM_LAND = 0xE2D9C6;   // white water carrying sediment
     private static final int BODY_SEA = 0x2E4A47;    // dark, glossy grey-green water face
@@ -53,6 +54,8 @@ public final class TsunamiVisual implements DisasterVisual {
         int nextCrash = 10;
         float lastFront = Float.NaN, lastSurge = Float.NaN;
         float frontSpeed, surgeSpeed;
+        boolean landfall;
+        int impact;      // ticks left of the landfall eruption
     }
 
     // ------------------------------------------------------------------ geometry (local frame, see TsunamiDisaster)
@@ -109,8 +112,13 @@ public final class TsunamiVisual implements DisasterVisual {
     public void contribute(ClientDisaster d, Vec3 cam, Atmosphere out) {
         Frame f = Frame.of(d);
         float s = d.strength();
-        // Real tsunamis usually arrive in ordinary weather: no sky tint. Only the spray haze is felt near the front.
+        // Real tsunamis usually arrive in ordinary weather, so no storm. Only a restrained grade as the wave closes in:
+        // a cooler, deeper sky and slightly darker land, and spray haze near the front.
         float toFront = (float) f.frontDistance(cam, f.activeFront());
+        float drama = s * (1f - smoothstep(40f, 260f, (float) f.areaDistance(cam)))
+                * Math.max(f.activeWall(), d.phase == Phase.WARNING ? 0.3f : 0f);
+        out.sky(GRADE_SKY, drama * 0.4f);
+        out.darken(drama * (0.05f + 0.02f * d.intensity));
         float spray = f.activeWall() * (1f - smoothstep(6f, 70f, toFront));
         out.fogColor(HAZE, spray);
         out.fog(28f + toFront * 0.9f + (5 - d.intensity) * 8f, spray * 0.8f);
@@ -119,6 +127,18 @@ public final class TsunamiVisual implements DisasterVisual {
         float far = 1f - smoothstep(40f, 160f, toFront);
         out.shake(f.activeWall() * s * (0.25f + d.intensity * 0.12f) * (near * 0.9f + far * 0.12f));
         out.fovPulse(f.activeWall() * s * (1f - smoothstep(3f, 22f, toFront)) * 0.7f);
+        // Landfall: the whole coast erupts; a jolt felt far inland.
+        if (d.visualState instanceof State st && st.impact > 0) {
+            float k = st.impact / 30f;
+            float dist = (float) f.frontDistance(cam, 0);
+            out.shake(k * (0.4f + 0.15f * d.intensity) * (1f - smoothstep(10f, 220f, dist)));
+            out.fovPulse(k * (1f - smoothstep(5f, 60f, dist)));
+        }
+        // The bore reaching you: a hard hit.
+        if (toFront < 4f && f.activeWall() > 0.2f) {
+            out.shake(0.6f + 0.1f * d.intensity);
+            out.fovPulse(1f);
+        }
     }
 
     // ------------------------------------------------------------------ particles + sound
@@ -134,8 +154,18 @@ public final class TsunamiVisual implements DisasterVisual {
         st.lastSurge = f.surge();
         FloodTint.update(d.id, new FloodTint.Zone(f.px(), f.pz(), f.dx(), f.dz(), f.halfWidth(), f.reach(), (int) f.waterY()));
         Vec3 cam = camera.position();
+        if (!st.landfall && f.wall() > 0.4f && f.front() > -2.5f && (d.phase == Phase.BUILDUP || d.phase == Phase.PEAK)) {
+            st.landfall = true;
+            st.impact = 30;
+            landfallSound(d, f, cam);
+        }
         tickSounds(d, f, st, cam);
         spawnParticles(d, f, st, level, camera, cam);
+        if (st.impact > 0) {
+            landfallEruption(d, f, level, camera, cam, st.impact);
+            st.impact--;
+        }
+        underwater(d, level, camera, cam);
     }
 
     private static float density() {
@@ -242,6 +272,61 @@ public final class TsunamiVisual implements DisasterVisual {
         }
     }
 
+    /**
+     * Landfall: the bore slams into the coast and white water erupts along the whole shoreline, far higher than the
+     * wave itself, then collapses forward over the land.
+     */
+    private void landfallEruption(ClientDisaster d, Frame f, ClientLevel level, Camera camera, Vec3 cam, int ticksLeft) {
+        float density = density();
+        double dist = f.frontDistance(cam, 0);
+        float lod = dist < 96 ? 1f : dist < 200 ? 0.5f : 0.2f;
+        float k = ticksLeft / 30f;
+        double surf = f.waterY() + 1;
+        double camLat = Mth.clamp(f.lateral(cam.x, cam.z), -f.halfWidth(), f.halfWidth());
+        double ix = -f.dx(), iz = -f.dz();
+        float height = 0.12f + 0.05f * d.intensity; // initial upward speed of the plume
+        int n = count((70 + 30 * d.intensity) * density * lod * k);
+        for (int i = 0; i < n; i++) {
+            double l = lateralSample(f, camLat);
+            double a = RANDOM.nextDouble() * 2 - 1;
+            double up = height * (0.5 + RANDOM.nextDouble()) * (0.6 + 0.4 * k);
+            WaveParticle.tint = shade(0xFFFFFF);
+            WaveParticle.sizeScale = 1.2f;
+            spawn(level, ModRegistries.WAVE_WATER.get(), f.x(a, l), surf + RANDOM.nextDouble() * 2, f.z(a, l),
+                    ix * 0.12 + jitter(0.05), up * 4, iz * 0.12 + jitter(0.05));
+            if (RANDOM.nextFloat() < 0.4f) {
+                WaveParticle.sizeScale = 1.5f;
+                spawn(level, ModRegistries.SEA_SPRAY.get(), f.x(a, l), surf + 3 + RANDOM.nextDouble() * (6 + 2 * d.intensity), f.z(a, l),
+                        ix * 0.08 + jitter(0.04), 0.05 + RANDOM.nextDouble() * 0.06, iz * 0.08 + jitter(0.04));
+            }
+            if (dist < 120 && RANDOM.nextFloat() < 0.5f) {
+                WaveParticle.sizeScale = 1f;
+                spawn(level, ModRegistries.WAVE_FOAM.get(), f.x(a, l), surf + 1 + RANDOM.nextDouble() * 4, f.z(a, l),
+                        ix * 0.25 + jitter(0.15), up * 5, iz * 0.25 + jitter(0.15));
+            }
+        }
+        WaveParticle.sizeScale = 1f;
+    }
+
+    /** Submerged in the flood: silt and debris fragments drifting past in the murk, bubbles rising. */
+    private void underwater(ClientDisaster d, ClientLevel level, Camera camera, Vec3 cam) {
+        if (camera.getFluidInCamera() != net.minecraft.world.level.material.FogType.WATER) return;
+        float inland = FloodTint.inland(cam.x, cam.y, cam.z);
+        if (inland < 0) return;
+        Frame f = Frame.of(d);
+        Vec3 flow = new Vec3(-f.dx(), 0, -f.dz()).scale(d.phase == Phase.AFTERMATH ? -0.12 : 0.06 + f.activeWall() * 0.2);
+        int n = count(10 * density());
+        for (int i = 0; i < n; i++) {
+            double x = cam.x + jitter(5), y = cam.y + jitter(3), z = cam.z + jitter(5);
+            WaveParticle.tint = FloodTint.mudColor(inland);
+            WaveParticle.sizeScale = 0.12f;
+            spawn(level, ModRegistries.WAVE_WATER.get(), x, y, z, flow.x + jitter(0.02), jitter(0.01), flow.z + jitter(0.02));
+            if (RANDOM.nextFloat() < 0.3f) level.addParticle(ParticleTypes.BUBBLE, x, y, z, flow.x, 0.05, flow.z);
+            if (RANDOM.nextFloat() < 0.15f) spawn(level, ModRegistries.FLOOD_DEBRIS.get(), x, y, z, flow.x, 0, flow.z);
+        }
+        WaveParticle.sizeScale = 1f;
+    }
+
     /** Where the bore slams into something solid (a wall, a house, a tree) it explodes upward in spray. */
     private void obstacleSpray(Frame f, ClientLevel level, double camLat, float front, float crest, double speed, int foam, float strength) {
         int probes = count(6 * strength);
@@ -274,7 +359,8 @@ public final class TsunamiVisual implements DisasterVisual {
 
     /** The retreating sea: a frothy edge on the water, bubbles and wet glints on the exposed seabed. */
     private void drawbackEdge(ClientDisaster d, Frame f, ClientLevel level, Vec3 cam, double camLat, float density) {
-        if (f.drawback() < 0.05f || f.frontDistance(cam, 0) > 300) return;
+        // Only while the sea is pulling back; once the wave is coming the returning water swallows the edge.
+        if (d.phase != Phase.WARNING || f.drawback() < 0.05f || f.frontDistance(cam, 0) > 300) return;
         float drawDist = 14 + 4 * d.intensity;
         double edge = -drawDist * f.drawback();
         double drop = (1 + d.intensity / 2) * f.drawback() * 0.8;
@@ -399,6 +485,16 @@ public final class TsunamiVisual implements DisasterVisual {
             play(sounds, ModRegistries.TSUNAMI_CRASH.get(), 1.5f + d.intensity * 0.4f, 0.75f + RANDOM.nextFloat() * 0.3f,
                     SoundInstance.Attenuation.LINEAR, at);
         }
+    }
+
+    /** The boom of landfall: a deep crash heard far inland, with a low rumble under it. */
+    private static void landfallSound(ClientDisaster d, Frame f, Vec3 cam) {
+        var sounds = Minecraft.getInstance().getSoundManager();
+        Vec3 at = f.nearestFrontPoint(cam, 0, 2);
+        Vec3 dir = at.subtract(cam);
+        Vec3 near = cam.add(dir.normalize().scale(Math.min(dir.length(), 12)));
+        play(sounds, ModRegistries.TSUNAMI_CRASH.get(), 2.5f + d.intensity * 0.5f, 0.55f, SoundInstance.Attenuation.NONE, near);
+        play(sounds, ModRegistries.DISTANT_RUMBLE.get(), 2.5f, 0.5f, SoundInstance.Attenuation.NONE, near);
     }
 
     private static void play(net.minecraft.client.sounds.SoundManager sounds, SoundEvent event, float volume, float pitch,

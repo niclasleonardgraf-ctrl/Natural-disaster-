@@ -51,6 +51,38 @@ Implementation notes: oriented quads come from overriding `VortexParticle#extrac
 large particles by their real size (vanilla culls by centre point). All quad particles share vanilla's
 16384-particle queue, so the spawn budget keeps the storm around 11k particles.
 
+### Tornado physics
+One wind model (`disaster/tornado/TornadoWind`) drives everything, on the server and on the client:
+- **Wind field:** wind speed rises to a peak at the core radius and falls off outside it (a Rankine vortex). Air
+  flows in along the ground and up through the core, and the storm's forward motion adds on top, so the right flank
+  of the track has the strongest winds. Peak speed scales with intensity, mirroring the EF scale.
+- **Objects:** everything is moved by aerodynamic drag on the wind/object speed difference, scaled by the object's
+  surface area per unit of mass. Items and small animals fly; iron golems barely move; crouching lowers your profile;
+  water shields you.
+- **Shelter:** under a roof the wind is cut down according to how enclosed the spot is. Underground or in a closed
+  room almost nothing gets through, until the roof is torn off.
+- **Impacts:** hitting a wall at speed hurts (like flying into a wall with elytra). Paintings and item frames are torn
+  off the walls.
+- **Blocks:** whether a block fails depends on the local wind speed versus its material's wind resistance, scaled by
+  how many faces are exposed. Roofs, walls and tree crowns fail first; buried blocks are safe. Plants are shredded,
+  glass shatters, turf is scoured into a damage path, trunks snap (the part above flies, a stump stays), and wood and
+  stone are torn out as debris at higher intensities.
+- **Debris:** thrown blocks are projectiles with material-dependent drag. They smash through glass, leaves and
+  plants, hit creatures in mid-air (damage from speed and mass), and land with the block's own break sound plus a
+  heavy thud.
+
+### Tornado sound design
+Layers cross-fade with distance, like real recordings:
+- a far "freight train" rumble (50–300 Hz with a slow rhythmic chug)
+- a mid-range rushing roar
+- an overwhelming core roar right next to the vortex
+- a wind howl driven by the real wind speed at your position (its pitch rises with the wind)
+- debris rattling around you, trees snapping and debris crashing where it actually happens
+- thunder after in-cloud lightning, delayed by distance
+
+Sheltering muffles the high, violent layers while the low rumble comes through. All sounds are original and
+synthesized by `tools/gen_sounds.py`.
+
 ## Testing a tsunami in-game
 
 1. `./gradlew runClient`, create a world with cheats on and stand on a beach facing the sea (any coast works; the
@@ -65,6 +97,7 @@ large particles by their real size (vanilla culls by centre point). All quad par
    **aftermath** (~25-40 s: the water drains top-down and the backwash drags debris out to sea).
 4. Afterwards the land is dry again, but the plants are gone, the turf near the shore is scoured to sand, gravel and
    coarse dirt, and the dropped debris lies where the water left it. Pre-existing water (sea, ponds, rivers) is untouched.
+5. Started away from any coast it becomes an inland flash flood rolling in from a random direction.
 
 ### What the tsunami looks like (and what it was compared against)
 Modelled on documented observations of real events (2004 Indian Ocean, 2011 Tohoku, 2025 Kamchatka; NOAA/USGS
@@ -74,19 +107,43 @@ water is turbulent white and grey-green; inland it turns dark, brown and debris-
 whitewater, spray and droplet textures plus floating-debris sprites (`tools/gen_textures.py`), a muddy tint on flood
 water (a small client mixin on `BiomeColors.getAverageWaterColor`, only inside an active flood zone above sea level),
 spray bursts where the bore hits solid blocks, and no storm sky.
-5. Started away from any coast it becomes an inland flash flood rolling in from a random direction.
+
+### Tsunami physics
+- **Flow field.** The water has a depth-averaged current everywhere in the flood zone: the bore drives water inland
+  at about its own speed (slowing behind it), high water goes slack, the second surge pushes again, and the backwash
+  pours back to sea, fastest early and near the shore. During the drawback the water near the beach flows seaward.
+- **Drag.** Anything in the water is pulled toward that current (F = k * (u - v)): items and boats are swept along,
+  mobs struggle, players can wade slack water but not the surge or backwash. The bore itself lifts, shoves and hurts.
+- **Hydrodynamic loading.** The flow's force scales with depth x velocity^2, strongest where the bore first hits and
+  fading inland. Blocks resist by material: plants and leaves fail first, then glass, wool, doors, fences, planks and
+  logs at higher intensity; stone, brick, concrete, metal and soil hold. Walls in the water column take the full
+  bore; water that rises later only pushes gently.
+- **Trees** in the run-up zone are uprooted whole when the force beats their anchoring.
+- **Floating wreckage.** Timber and foliage torn loose become tumbling block displays that ride the water surface
+  half-submerged, are carried inland and dragged back out by the backwash, knock against walls, and settle as real
+  blocks where the water leaves them: permanent debris fields. Pieces still afloat at sea at the end are lost.
+- **Behaviour.** Animals run for the highest ground nearby; villagers shelter.
+
+### Cinematic touches
+Landfall erupts as a white spray curtain along the whole coast with a deep boom and a camera jolt felt inland; the
+bore reaching you hits hard (shake + FOV punch); under flood water the view closes to a few blocks of brown murk with
+silt and bubbles drifting by; a restrained grade (cooler sky, slightly darker land) builds as the wave closes in.
 
 ## Automated tests
 
 `./gradlew runGameTestServer`. These run on a dedicated-server dist, so they also check that no client-only code loads on a server:
 - `tornado_damages_terrain`: a pig gets lifted and the turf is scoured
 - `tornado_respects_block_toggle`: with `blockDestruction=false` no blocks change
-- `tornado_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.23 ms)
+- `tornado_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.2–0.3 ms)
+- `tornado_shelter_protects`: an animal in a sealed bunker stays put while an exposed one is lifted
+- `tornado_breaks_glass_and_snaps_trees`: glass shatters and a trunk snaps, leaving a stump
 - `tsunami_floods_and_recedes` (own `tsunami_arena` with a walled sea, beach, plants and a pond): the sea draws back,
   the land floods, then every flood block is gone, every original sea/pond block is still water, a pig was pushed/fled
   inland, and the plant damage and erosion stay
 - `tsunami_respects_block_toggle`: with `blockDestruction=false` the tsunami changes no blocks
 - `tsunami_intensity3_tick_cost`: below 2 ms/tick while the wave floods (measured ~0.3-0.6 ms with ~8,600 water blocks)
+- `tsunami_forces_and_debris`: an intensity-5 bore against a stone-brick sea wall (holds), a wooden hut (fails and
+  floats off as wreckage), glass panes (shatter) and a tree (uprooted)
 
 ## Configuration
 
@@ -165,6 +222,8 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
   moment stays in the world. `/disaster stop` and `/disaster stop <id> now` both clean up properly.
 - Tsunami: replacing the lower half of a two-block plant with water can leave its upper half floating above the flood
   line (block updates are suppressed to keep the water static).
+- Tsunami: floating wreckage uses block-display entities (tagged `realisticdisasters_debris`). If the server stops
+  mid-tsunami they stay where they are; `/kill @e[tag=realisticdisasters_debris]` removes them.
 - Tsunami: the bore is drawn with particles (no moving block geometry), so from inside it you see individual soft
   foam sprites rather than a solid surface.
 - Tsunami: the muddy flood tint applies to any water re-meshed inside the flood zone while the tsunami is active

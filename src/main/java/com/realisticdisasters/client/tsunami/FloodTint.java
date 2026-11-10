@@ -50,6 +50,27 @@ public final class FloodTint {
         return biomeColor;
     }
 
+    /**
+     * @return how far inland {@code (x, y, z)} lies inside a flood zone (0 at the shore .. 1 at the inland limit), or
+     *         -1 if it isn't in one. Used for the murk when the camera is under flood water.
+     */
+    public static float inland(double x, double y, double z) {
+        for (Zone zn : ZONES.values()) {
+            if (y <= zn.waterY() + 0.5) continue;
+            double dx = x - zn.px(), dz = z - zn.pz();
+            double axial = -dx * zn.dx() - dz * zn.dz();
+            double lateral = -dx * zn.dz() + dz * zn.dx();
+            if (axial < -3 || axial > zn.reach() + 6 || Math.abs(lateral) > zn.halfWidth() + 3) continue;
+            return Mth.clamp((float) axial / zn.reach(), 0f, 1f);
+        }
+        return -1f;
+    }
+
+    /** The flood's colour at that point (same ramp as the water tint). */
+    public static int mudColor(float inland) {
+        return lerp(SHORE, INLAND, inland);
+    }
+
     private static int lerp(int a, int b, float t) {
         int r = (int) Mth.lerp(t, (a >> 16) & 255, (b >> 16) & 255);
         int g = (int) Mth.lerp(t, (a >> 8) & 255, (b >> 8) & 255);

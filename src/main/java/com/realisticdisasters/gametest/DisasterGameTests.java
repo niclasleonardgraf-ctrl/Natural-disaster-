@@ -38,9 +38,12 @@ public final class DisasterGameTests {
         FUNCTIONS.register("tornado_damages_terrain", () -> DisasterGameTests::tornadoDamagesTerrain);
         FUNCTIONS.register("tornado_respects_block_toggle", () -> DisasterGameTests::tornadoRespectsBlockToggle);
         FUNCTIONS.register("tornado_intensity3_tick_cost", () -> DisasterGameTests::tornadoTickCost);
+        FUNCTIONS.register("tornado_shelter_protects", () -> DisasterGameTests::tornadoShelterProtects);
+        FUNCTIONS.register("tornado_breaks_glass_and_snaps_trees", () -> DisasterGameTests::tornadoBreaksGlassAndSnapsTrees);
         FUNCTIONS.register("tsunami_floods_and_recedes", () -> DisasterGameTests::tsunamiFloodsAndRecedes);
         FUNCTIONS.register("tsunami_respects_block_toggle", () -> DisasterGameTests::tsunamiRespectsBlockToggle);
         FUNCTIONS.register("tsunami_intensity3_tick_cost", () -> DisasterGameTests::tsunamiTickCost);
+        FUNCTIONS.register("tsunami_forces_and_debris", () -> DisasterGameTests::tsunamiForcesAndDebris);
     }
 
     public static void register(IEventBus modBus) {
@@ -53,9 +56,12 @@ public final class DisasterGameTests {
         add(event, "tornado_damages_terrain", event.registerEnvironment(ModRegistries.id("env_terrain")), 500);
         add(event, "tornado_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_toggle")), 300);
         add(event, "tornado_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_perf")), 400);
+        add(event, "tornado_shelter_protects", event.registerEnvironment(ModRegistries.id("env_shelter")), 300);
+        add(event, "tornado_breaks_glass_and_snaps_trees", event.registerEnvironment(ModRegistries.id("env_materials")), 400);
         addTsunami(event, "tsunami_floods_and_recedes", event.registerEnvironment(ModRegistries.id("env_tsunami_flood")), 1600);
         addTsunami(event, "tsunami_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_tsunami_toggle")), 1200);
         addTsunami(event, "tsunami_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_tsunami_perf")), 500);
+        addTsunami(event, "tsunami_forces_and_debris", event.registerEnvironment(ModRegistries.id("env_tsunami_forces")), 2400);
     }
 
     private static void addTsunami(RegisterGameTestsEvent event, String name, Holder<TestEnvironmentDefinition<?>> env, int maxTicks) {
@@ -153,6 +159,46 @@ public final class DisasterGameTests {
             RealisticDisasters.LOGGER.info("Tornado intensity 3 average server cost: {} ms/tick", String.format("%.3f", cost));
             helper.assertTrue(cost < 2.0, "tornado too expensive: " + cost + " ms/tick");
             helper.succeed();
+        });
+    }
+
+    /** Shelter physics: a sealed bunker keeps its occupant on the ground while an exposed animal gets lifted. */
+    private static void tornadoShelterProtects(GameTestHelper helper) {
+        // obsidian bunker (wind can't break it) around (16,4,12); the pig stands inside
+        for (int x = 15; x <= 17; x++)
+            for (int y = 4; y <= 6; y++)
+                for (int z = 11; z <= 13; z++)
+                    if (!(x == 16 && z == 12 && y <= 5)) helper.setBlock(new BlockPos(x, y, z), Blocks.OBSIDIAN);
+        Pig sheltered = helper.spawn(EntityType.PIG, new BlockPos(16, 4, 12));
+        Pig exposed = helper.spawn(EntityType.PIG, new BlockPos(19, 4, 16));
+        Vec3 start = sheltered.position();
+        double startY = exposed.getY();
+        double[] lift = {0};
+        helper.onEachTick(() -> lift[0] = Math.max(lift[0], exposed.getY() - startY));
+        Disaster tornado = startPeakTornado(helper, 4);
+        helper.runAfterDelay(160, () -> {
+            double moved = sheltered.position().distanceTo(start);
+            DisasterManager.stop(helper.getLevel(), tornado.id(), false);
+            helper.assertTrue(lift[0] > 2.0, "exposed pig was not lifted (" + lift[0] + ")");
+            helper.assertTrue(moved < 1.0, "sheltered pig was moved " + moved + " blocks");
+            helper.succeed();
+        });
+    }
+
+    /** Material failure: glass shatters and a tree trunk snaps near the funnel (leaving a stump). */
+    private static void tornadoBreaksGlassAndSnapsTrees(GameTestHelper helper) {
+        BlockPos glass = new BlockPos(18, 4, 18);
+        helper.setBlock(glass, Blocks.GLASS);
+        for (int y = 4; y <= 8; y++) helper.setBlock(new BlockPos(14, y, 17), Blocks.OAK_LOG);
+        Disaster tornado = startPeakTornado(helper, 4);
+        helper.succeedWhen(() -> {
+            helper.assertTrue(!helper.getLevel().getBlockState(helper.absolutePos(glass)).is(Blocks.GLASS), "glass still intact");
+            int logs = 0;
+            for (int y = 4; y <= 8; y++) if (helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(14, y, 17))).is(Blocks.OAK_LOG)) logs++;
+            // A snapped trunk leaves a stump: the top must be gone, the stump may stay.
+            helper.assertTrue(!helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(14, 8, 17))).is(Blocks.OAK_LOG)
+                    && logs <= 3, "trunk not snapped (" + logs + " logs left)");
+            DisasterManager.stop(helper.getLevel(), tornado.id(), false);
         });
     }
 
@@ -280,6 +326,57 @@ public final class DisasterGameTests {
         if (was.getFluidState().isEmpty() != now.getFluidState().isEmpty()) return true;
         if (was.is(Blocks.POPPY) || was.is(Blocks.SHORT_GRASS)) return true;
         return now.is(Blocks.SAND) || now.is(Blocks.GRAVEL) || now.is(Blocks.COARSE_DIRT);
+    }
+
+    private static int countIn(GameTestHelper helper, int x0, int x1, int y0, int y1, int z0, int z1,
+                               net.minecraft.world.level.block.Block block) {
+        int n = 0;
+        for (int x = x0; x <= x1; x++)
+            for (int y = y0; y <= y1; y++)
+                for (int z = z0; z <= z1; z++)
+                    if (helper.getBlockState(new BlockPos(x, y, z)).is(block)) n++;
+        return n;
+    }
+
+    /**
+     * Material-dependent damage: an intensity-5 bore against a stone-brick sea wall (must hold), a wooden hut (must
+     * partly fail and float off as debris), glass panes (must shatter) and a tree (must be uprooted).
+     */
+    private static void tsunamiForcesAndDebris(GameTestHelper helper) {
+        for (int x = 22; x <= 26; x++)
+            for (int z = 8; z <= 10; z++)
+                for (int y = 5; y <= 7; y++) helper.setBlock(new BlockPos(x, y, z), Blocks.STONE_BRICKS);
+        for (int x = 22; x <= 27; x++)
+            for (int z = 20; z <= 27; z++)
+                for (int y = 5; y <= 7; y++)
+                    if (x == 22 || x == 27 || z == 20 || z == 27) helper.setBlock(new BlockPos(x, y, z), Blocks.OAK_PLANKS);
+        for (int z = 32; z <= 38; z++) helper.setBlock(new BlockPos(24, 5, z), Blocks.GLASS_PANE);
+        for (int y = 5; y <= 9; y++) helper.setBlock(new BlockPos(29, y, 15), Blocks.OAK_LOG);
+        for (int x = 27; x <= 31; x++)
+            for (int z = 13; z <= 17; z++)
+                for (int y = 8; y <= 10; y++)
+                    if (helper.getBlockState(new BlockPos(x, y, z)).isAir())
+                        helper.setBlock(new BlockPos(x, y, z), Blocks.OAK_LEAVES.defaultBlockState()
+                                .setValue(net.minecraft.world.level.block.LeavesBlock.PERSISTENT, true));
+        int planksBefore = countIn(helper, 22, 27, 5, 7, 20, 27, Blocks.OAK_PLANKS);
+        TsunamiDisaster t = startTsunami(helper, 5, 0.25);
+        int[] maxDebris = {0};
+        helper.onEachTick(() -> maxDebris[0] = Math.max(maxDebris[0], t.debrisCount()));
+        helper.succeedWhen(() -> {
+            helper.assertTrue(t.isFinished(), "tsunami still running: " + t.phase());
+            helper.assertTrue(DisasterManager.blockQueue(helper.getLevel()).size() == 0, "block queue not drained yet");
+            int stone = countIn(helper, 22, 26, 5, 7, 8, 10, Blocks.STONE_BRICKS);
+            helper.assertTrue(stone == 45, "the stone sea wall should hold (" + stone + "/45)");
+            int planks = countIn(helper, 22, 27, 5, 7, 20, 27, Blocks.OAK_PLANKS);
+            helper.assertTrue(planks < planksBefore * 0.8, "the wooden hut should partly fail (" + planks + "/" + planksBefore + ")");
+            int glass = countIn(helper, 24, 24, 5, 5, 32, 38, Blocks.GLASS_PANE);
+            helper.assertTrue(glass <= 2, "glass panes should shatter (" + glass + " left)");
+            int logs = countIn(helper, 29, 29, 5, 9, 15, 15, Blocks.OAK_LOG);
+            helper.assertTrue(logs == 0, "the tree should be uprooted (" + logs + " logs left)");
+            helper.assertTrue(maxDebris[0] > 0, "no floating debris was produced");
+            RealisticDisasters.LOGGER.info("Tsunami forces test: planks {} -> {}, glass 7 -> {}, max floating debris {}",
+                    planksBefore, planks, glass, maxDebris[0]);
+        });
     }
 
     /** Intensity 3 while the wave runs up and floods: block work + entity pushes must stay under 2 ms/tick. */

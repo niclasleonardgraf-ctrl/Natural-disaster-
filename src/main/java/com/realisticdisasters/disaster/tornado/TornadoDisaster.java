@@ -12,6 +12,9 @@ import com.realisticdisasters.disaster.Phase;
 import com.realisticdisasters.registry.ModRegistries;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.sounds.SoundSource;
+import net.neoforged.neoforge.common.Tags;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -52,7 +55,28 @@ public class TornadoDisaster extends Disaster {
     private final float maxHardness;
     private final double baseSpeed;
     private final int maxDebris;
-    private final List<FallingBlockEntity> debris = new ArrayList<>();
+    private final List<Debris> debris = new ArrayList<>();
+    /** Horizontal speed of each pushed entity last tick (for wall-impact damage). */
+    private it.unimi.dsi.fastutil.ints.Int2DoubleOpenHashMap lastSpeed = new it.unimi.dsi.fastutil.ints.Int2DoubleOpenHashMap();
+
+    /** A block thrown by the tornado: a projectile with material-dependent drag. */
+    private static final class Debris {
+        final FallingBlockEntity entity;
+        final BlockState state;
+        final double drag;
+        final double mass;
+        final it.unimi.dsi.fastutil.ints.IntOpenHashSet hit = new it.unimi.dsi.fastutil.ints.IntOpenHashSet();
+        Vec3 lastPos;
+        int age;
+
+        Debris(FallingBlockEntity entity, BlockState state, double drag, double mass) {
+            this.entity = entity;
+            this.state = state;
+            this.drag = drag;
+            this.mass = mass;
+            this.lastPos = entity.position();
+        }
+    }
     private double heading;
     private double headingDrift;
     private double currentSpeed;
@@ -113,6 +137,7 @@ public class TornadoDisaster extends Disaster {
     @Override
     protected void onEnd() {
         debris.clear();
+        lastSpeed.clear();
     }
 
     @Override
@@ -132,11 +157,12 @@ public class TornadoDisaster extends Disaster {
         if (age() % 20 == 0 && phase() != Phase.AFTERMATH) {
             alertMobs();
         }
+        TornadoWind wind = wind();
         if (force > 0.05f) {
-            applyWindToEntities(force);
-            if (force > 0.3f) ripBlocks(force);
+            applyWindToEntities(wind, force);
+            if (force > 0.25f) loadBlocks(wind, force);
         }
-        tickDebris(force);
+        tickDebris(wind);
 
         if (phase() == Phase.PEAK && intensity >= 2 && random.nextInt(Math.max(40, 260 - intensity * 40)) == 0) {
             strikeLightning();
@@ -169,54 +195,92 @@ public class TornadoDisaster extends Disaster {
 
     // ------------------------------------------------------------------ wind field
 
-    /** Horizontal + vertical wind acting at a point. Shared by entities and debris. */
-    private Vec3 windAt(double x, double y, double z, double force, double liftBoost) {
-        double dx = x - pos.x, dz = z - pos.z;
-        double r = Math.sqrt(dx * dx + dz * dz);
-        if (r > pullRadius || r < 1.0e-3) return Vec3.ZERO;
-        double nx = dx / r, nz = dz / r;
-        double rel = r / pullRadius;
-        double power = force * (0.6 + intensity * 0.15);
-        double above = y - pos.y;
-        double flingHeight = 8 + intensity * 4;
-
-        double inward = 0.05 * (1 - rel) * power;
-        double swirl = 0.11 * (1 - rel * 0.55) * power;
-        double lift = 0;
-        double coreEdge = coreRadius * 1.25;
-        if (r < coreEdge) {
-            lift = (0.11 + 0.022 * intensity) * (1 - r / coreEdge * 0.6) * power * liftBoost;
-        }
-        if (above > flingHeight) {
-            // Thrown out of the funnel near the top.
-            lift = Math.min(lift, 0.02);
-            inward = -0.16 * power;
-        }
-        // counter-clockwise rotation seen from above
-        return new Vec3(-nx * inward - nz * swirl, lift, -nz * inward + nx * swirl);
+    /** The tornado's current wind field (see {@link TornadoWind}). */
+    public TornadoWind wind() {
+        return new TornadoWind(pos, coreRadius, height, intensity, Math.cos(heading), Math.sin(heading), currentSpeed,
+                strength() * touchdown());
     }
 
-    private void applyWindToEntities(float force) {
-        AABB box = new AABB(pos.x - pullRadius, pos.y - 6, pos.z - pullRadius, pos.x + pullRadius, pos.y + height, pos.z + pullRadius);
-        DamageSource source = level.damageSources().source(ModRegistries.TORNADO_DAMAGE);
-        for (Entity e : level.getEntities((Entity) null, box, e -> !e.isSpectator() && !(e instanceof FallingBlockEntity))) {
-            if (e instanceof Player p && (p.getAbilities().flying || p.isCreative() && p.isShiftKeyDown())) continue;
-            if (e.isPassenger()) continue;
-            double resist = 0;
-            if (e instanceof LivingEntity le) resist = Mth.clamp(le.getAttributeValue(Attributes.KNOCKBACK_RESISTANCE), 0, 1) * 0.7;
-            Vec3 wind = windAt(e.getX(), e.getY(), e.getZ(), force, 1.0).scale(1 - resist);
-            if (wind == Vec3.ZERO) continue;
-            Vec3 v = e.getDeltaMovement().add(wind);
-            double max = 1.4;
-            if (v.lengthSqr() > max * max) v = v.normalize().scale(max);
-            e.setDeltaMovement(v);
-            e.hurtMarked = true;
+    /**
+     * Fraction of the wind reaching a point. Out in the open: all of it. Under a roof it depends on how enclosed the
+     * spot is; underground or in a closed room almost nothing gets through (until the roof is torn off).
+     */
+    private float exposure(BlockPos at) {
+        if (level.canSeeSky(at)) return 1f;
+        int open = 0;
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            BlockPos a = at.relative(dir), b = a.relative(dir);
+            if (!level.getBlockState(a).blocksMotion() && !level.getBlockState(b).blocksMotion()) open++;
+        }
+        return 0.05f + 0.2f * open;
+    }
 
+    // ------------------------------------------------------------------ entities
+
+    private void applyWindToEntities(TornadoWind wind, float force) {
+        double outer = wind.outerRadius();
+        AABB box = new AABB(pos.x - outer, pos.y - 8, pos.z - outer, pos.x + outer, pos.y + height, pos.z + outer);
+        DamageSource abrasion = level.damageSources().source(ModRegistries.TORNADO_DAMAGE);
+        var speeds = new it.unimi.dsi.fastutil.ints.Int2DoubleOpenHashMap();
+        for (Entity e : level.getEntities((Entity) null, box, e -> !e.isSpectator() && !(e instanceof FallingBlockEntity))) {
+            if (e instanceof Player p && p.getAbilities().flying) continue;
+            if (e.isPassenger()) continue;
+            Vec3 w = wind.at(e.getX(), e.getY() + e.getBbHeight() * 0.5, e.getZ());
+            if (w.lengthSqr() < 0.0025) continue;
+            float shelter = exposure(BlockPos.containing(e.getEyePosition()));
+            w = w.scale(shelter);
+
+            if (e instanceof net.minecraft.world.entity.decoration.HangingEntity hanging) {
+                // Paintings and item frames get torn off the wall.
+                if (w.horizontalDistance() > 0.65 && random.nextFloat() < 0.15f) hanging.hurtServer(level, level.damageSources().generic(), 1f);
+                continue;
+            }
+
+            // Slammed into a wall at speed? That hurts (same rule as flying into a wall with elytra).
+            double prev = lastSpeed.get(e.getId());
+            if (e.horizontalCollision && prev > 0.55 && e instanceof LivingEntity le) {
+                le.hurtServer(level, level.damageSources().flyIntoWall(), (float) ((prev - 0.55) * 14));
+            }
+
+            // Aerodynamic drag: the push depends on the speed difference between wind and object, and on how
+            // much surface the object offers per unit of mass. Objects already moving with the wind feel nothing.
+            Vec3 v = e.getDeltaMovement();
+            Vec3 rel = w.subtract(v);
+            double k = dragCoefficient(e);
+            if (e.onGround()) k *= 0.55;   // friction / grip until a gust gets underneath
+            Vec3 nv = v.add(rel.scale(k * Math.min(1.5, 0.35 + rel.length())));
+            double max = 1.8;
+            if (nv.lengthSqr() > max * max) nv = nv.normalize().scale(max);
+            e.setDeltaMovement(nv);
+            e.hurtMarked = true;
+            speeds.put(e.getId(), nv.horizontalDistance());
+
+            // Inside the debris-laden core you get sandblasted.
             double dx = e.getX() - pos.x, dz = e.getZ() - pos.z;
-            if (e instanceof LivingEntity le && age() % 10 == 0 && dx * dx + dz * dz < coreRadius * coreRadius) {
-                le.hurtServer(level, source, (0.5f + intensity * 0.5f) * force);
+            if (e instanceof LivingEntity le && age() % 10 == 0 && shelter > 0.5f && dx * dx + dz * dz < coreRadius * coreRadius) {
+                le.hurtServer(level, abrasion, (0.5f + intensity * 0.5f) * force);
             }
         }
+        lastSpeed = speeds;
+    }
+
+    /** Drag per tick relative to the wind: big light objects fly, small heavy ones resist. */
+    private static double dragCoefficient(Entity e) {
+        double k;
+        if (e instanceof net.minecraft.world.entity.item.ItemEntity || e instanceof net.minecraft.world.entity.ExperienceOrb) {
+            k = 0.16;
+        } else if (e instanceof net.minecraft.world.entity.projectile.Projectile) {
+            k = 0.05;
+        } else if (e instanceof LivingEntity le) {
+            double area = e.getBbWidth() * e.getBbHeight();
+            k = 0.1 / Math.max(0.6, Math.sqrt(area));
+            k *= 1 - 0.8 * Mth.clamp(le.getAttributeValue(Attributes.KNOCKBACK_RESISTANCE), 0, 1);
+            if (le.isShiftKeyDown()) k *= 0.6;   // crouching lowers your profile
+        } else {
+            k = 0.07;   // boats, minecarts, armor stands...
+        }
+        if (e.isInWater()) k *= 0.3;
+        return k;
     }
 
     // ------------------------------------------------------------------ mob reactions
@@ -238,79 +302,212 @@ public class TornadoDisaster extends Disaster {
         }
     }
 
-    // ------------------------------------------------------------------ block damage
+    // ------------------------------------------------------------------ blocks
 
-    private void ripBlocks(float force) {
+    /**
+     * Wind loading on blocks: samples points in and around the funnel (including walls, roofs and tree crowns, not
+     * just the ground), compares the local wind against the block's wind resistance and how exposed it is, and fails
+     * it the way that material would fail. Changes go through the batched block queue.
+     */
+    private void loadBlocks(TornadoWind wind, float force) {
         if (!DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean()) return;
-        int attempts = Math.round((1 + intensity * 1.6f) * force);
+        int attempts = Math.round((6 + intensity * 6) * force);
         var queue = DisasterManager.blockQueue(level);
+        double reach = coreRadius * 1.7;
+        int bottom = Mth.floor(pos.y) - 2;
         for (int i = 0; i < attempts; i++) {
             double a = random.nextDouble() * Math.PI * 2;
-            double rr = Math.sqrt(random.nextDouble()) * coreRadius * 1.1;
+            // most samples where the winds peak (inside ~1.25 core radii), the rest in the outer field
+            double rr = random.nextFloat() < 0.7f ? Math.sqrt(random.nextDouble()) * coreRadius * 1.25
+                    : coreRadius * 1.25 + random.nextDouble() * (reach - coreRadius * 1.25);
             int x = Mth.floor(pos.x + Math.cos(a) * rr);
             int z = Mth.floor(pos.z + Math.sin(a) * rr);
-            BlockPos column = new BlockPos(x, 0, z);
-            if (!level.isLoaded(column)) continue;
-            int top = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1;
-            if (top < pos.y - 6 || top > pos.y + height * 0.5) continue;
-            BlockPos target = new BlockPos(x, top, z);
-            if (!queue.add(l -> rip(target))) return;
+            if (!level.isLoaded(new BlockPos(x, 0, z))) continue;
+            int top = Math.min(level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1, bottom + 48);
+            if (top < bottom) continue;
+            int y = bottom + random.nextInt(top - bottom + 1);
+            double speed = wind.at(x + 0.5, y + 0.5, z + 0.5).length();
+            if (speed < 0.2) continue;
+            BlockPos sample = new BlockPos(x, y, z);
+            if (!queue.add(l -> windLoad(sample, speed))) return;
         }
     }
 
-    private void rip(BlockPos bp) {
+    private void windLoad(BlockPos sample, double windSpeed) {
         if (isFinished()) return;
-        BlockState st = level.getBlockState(bp);
-        if (st.isAir() || st.getBlock() instanceof LiquidBlock || st.hasBlockEntity()) return;
-        float hardness = st.getDestroySpeed(level, bp);
-        if (hardness < 0 || hardness > maxHardness) return;
-        if (!DisasterProtection.canModify(level, bp, st)) return;
+        // A sample in the air drops to the surface below it: wind attacks surfaces.
+        BlockPos p = sample;
+        BlockState st = level.getBlockState(p);
+        for (int i = 0; i < 6 && st.isAir(); i++) {
+            p = p.below();
+            st = level.getBlockState(p);
+        }
+        if (st.isAir() || st.getBlock() instanceof LiquidBlock) return;
+        int open = openFaces(p);
+        if (open == 0) return;   // fully enclosed: the wind can't get at it
+        double resist = windResistance(st, p);
+        double load = windSpeed * (0.45 + 0.55 * open / 5.0);
+        double over = load / resist - 1;
+        if (over <= 0 || random.nextDouble() > Math.min(1, over * 1.2)) return;
+        if (!DisasterProtection.canModify(level, p, st)) return;
+        fail(p, st, open);
+    }
 
-        // Scour the turf: leaves a visible, permanent damage path.
-        if (st.is(Blocks.GRASS_BLOCK) || st.is(Blocks.PODZOL) || st.is(Blocks.MYCELIUM) || st.is(Blocks.DIRT_PATH)) {
-            level.levelEvent(2001, bp, net.minecraft.world.level.block.Block.getId(st));
-            level.setBlock(bp, random.nextFloat() < 0.35f ? Blocks.COARSE_DIRT.defaultBlockState() : Blocks.DIRT.defaultBlockState(), 3);
+    private int openFaces(BlockPos p) {
+        int open = 0;
+        if (!level.getBlockState(p.above()).blocksMotion()) open++;
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            if (!level.getBlockState(p.relative(dir)).blocksMotion()) open++;
+        }
+        return open;
+    }
+
+    /** Wind speed (blocks/tick, fully exposed) a block withstands. */
+    private double windResistance(BlockState st, BlockPos p) {
+        if (st.hasBlockEntity()) return Double.MAX_VALUE;
+        float hardness = st.getDestroySpeed(level, p);
+        if (hardness < 0) return Double.MAX_VALUE;
+        if (st.canBeReplaced() || st.is(BlockTags.FLOWERS) || st.is(BlockTags.SAPLINGS) || st.is(BlockTags.CROPS)) return 0.12;
+        if (st.is(BlockTags.LEAVES)) return 0.3;
+        if (st.is(Tags.Blocks.GLASS_BLOCKS) || st.is(Tags.Blocks.GLASS_PANES)) return 0.4;
+        if (st.is(BlockTags.WOOL) || st.is(BlockTags.WOOL_CARPETS)) return 0.45;
+        if (st.is(BlockTags.PLANKS) || st.is(BlockTags.WOODEN_FENCES) || st.is(BlockTags.WOODEN_DOORS)
+                || st.is(BlockTags.WOODEN_STAIRS) || st.is(BlockTags.WOODEN_SLABS) || st.is(BlockTags.WOODEN_TRAPDOORS)) return 0.7;
+        if (st.is(BlockTags.LOGS)) return 0.8;
+        if (isTurf(st) || isSoil(st)) return 0.75;
+        return 0.35 + hardness * 0.4;   // stone ~0.95, cobble/bricks ~1.15, obsidian: never
+    }
+
+    private static boolean isTurf(BlockState st) {
+        return st.is(Blocks.GRASS_BLOCK) || st.is(Blocks.PODZOL) || st.is(Blocks.MYCELIUM) || st.is(Blocks.DIRT_PATH);
+    }
+
+    private static boolean isSoil(BlockState st) {
+        return st.is(BlockTags.DIRT) || st.is(BlockTags.SAND) || st.is(Blocks.GRAVEL);
+    }
+
+    private static boolean isFragile(BlockState st) {
+        return !st.isAir() && (st.canBeReplaced() || st.is(BlockTags.LEAVES) || st.is(Tags.Blocks.GLASS_BLOCKS)
+                || st.is(Tags.Blocks.GLASS_PANES) || st.is(BlockTags.FLOWERS) || st.is(BlockTags.CROPS))
+                && st.getFluidState().isEmpty();
+    }
+
+    /** Fails a block the way its material fails in real wind. */
+    private void fail(BlockPos p, BlockState st, int open) {
+        boolean topExposed = !level.getBlockState(p.above()).blocksMotion();
+        if (isTurf(st)) {
+            if (!topExposed) return;
+            level.levelEvent(2001, p, net.minecraft.world.level.block.Block.getId(st));
+            level.setBlock(p, random.nextFloat() < 0.35f ? Blocks.COARSE_DIRT.defaultBlockState() : Blocks.DIRT.defaultBlockState(), 3);
             return;
         }
-        boolean soil = st.is(BlockTags.DIRT) || st.is(BlockTags.SAND) || st.is(Blocks.GRAVEL);
-        if (soil && (intensity < 5 || random.nextFloat() > 0.15f)) return;
-
-        // Plants, snow layers and other replaceables just get shredded.
-        if (st.canBeReplaced() || !st.isCollisionShapeFullBlock(level, bp) && !st.is(BlockTags.LEAVES) && random.nextFloat() < 0.5f) {
-            level.destroyBlock(bp, false);
+        if (isSoil(st)) {
+            // Only violent tornadoes scour the soil itself.
+            if (topExposed && intensity >= 4 && random.nextFloat() < 0.2f) launch(p, st, true);
             return;
         }
+        if (st.canBeReplaced() || st.is(BlockTags.FLOWERS) || st.is(BlockTags.CROPS) || st.is(BlockTags.SAPLINGS)) {
+            level.destroyBlock(p, false);
+            return;
+        }
+        if (st.is(Tags.Blocks.GLASS_BLOCKS) || st.is(Tags.Blocks.GLASS_PANES)) {
+            level.destroyBlock(p, false);   // shatters (vanilla glass-break sound and shards)
+            return;
+        }
+        if (st.is(BlockTags.LOGS)) {
+            snapTree(p);
+            return;
+        }
+        if (st.is(BlockTags.LEAVES) && random.nextFloat() < 0.5f) {
+            level.destroyBlock(p, false);
+            return;
+        }
+        if (!launch(p, st, false)) level.destroyBlock(p, false);
+    }
 
-        prune();
-        if (debris.size() < maxDebris && random.nextFloat() < 0.7f) {
-            FallingBlockEntity fb = FallingBlockEntity.fall(level, bp, st);
-            fb.dropItem = false;
-            if (soil) fb.disableDrop(); // clods crumble on impact instead of littering the land with dirt blocks
-            fb.setHurtsEntities(0.6f + intensity * 0.3f, 8 + intensity * 4);
-            Vec3 w = windAt(fb.getX(), fb.getY(), fb.getZ(), 1.0, 1.0);
-            fb.setDeltaMovement(w.x * 4, 0.45 + random.nextDouble() * 0.35, w.z * 4);
-            fb.hurtMarked = true;
-            debris.add(fb);
-        } else {
-            level.destroyBlock(bp, false);
+    /** A trunk fails at this point: everything above it goes with the wind. */
+    private void snapTree(BlockPos base) {
+        level.playSound(null, base, ModRegistries.WOOD_SNAP.get(), SoundSource.BLOCKS, 2.5f, 0.8f + random.nextFloat() * 0.3f);
+        BlockPos p = base;
+        for (int i = 0; i < 10; i++) {
+            BlockState st = level.getBlockState(p);
+            if (!st.is(BlockTags.LOGS) && !(i > 0 && st.is(BlockTags.LEAVES))) break;
+            if (!DisasterProtection.canModify(level, p, st)) break;
+            if (!launch(p, st, false)) level.destroyBlock(p, false);
+            p = p.above();
         }
     }
 
-    private void prune() {
-        debris.removeIf(fb -> fb.isRemoved() || fb.time > 220);
+    /** Throws a block into the wind as falling-block debris. Returns false when the debris cap is reached. */
+    private boolean launch(BlockPos p, BlockState st, boolean crumble) {
+        if (debris.size() >= maxDebris) return false;
+        FallingBlockEntity fb = FallingBlockEntity.fall(level, p, st);
+        fb.dropItem = false;
+        if (crumble) fb.disableDrop();   // soil clods crumble on impact instead of littering the land
+        fb.setHurtsEntities(0.6f + intensity * 0.3f, 8 + intensity * 4);
+        Vec3 w = wind().at(fb.getX(), fb.getY() + 0.5, fb.getZ());
+        fb.setDeltaMovement(w.x * 0.7, Math.max(0.3, w.y * 0.6) + 0.15, w.z * 0.7);
+        fb.hurtMarked = true;
+        double drag, mass;
+        if (st.is(BlockTags.LEAVES) || st.is(BlockTags.WOOL)) { drag = 0.14; mass = 0.2; }
+        else if (st.is(BlockTags.LOGS) || st.is(BlockTags.PLANKS) || st.getSoundType() == net.minecraft.world.level.block.SoundType.WOOD) { drag = 0.08; mass = 0.6; }
+        else if (isSoil(st)) { drag = 0.07; mass = 0.7; }
+        else { drag = 0.045; mass = 1.0; }
+        debris.add(new Debris(fb, st, drag, mass));
+        return true;
     }
 
-    private void tickDebris(float force) {
+    // ------------------------------------------------------------------ debris
+
+    private void tickDebris(TornadoWind wind) {
         if (debris.isEmpty()) return;
-        prune();
-        for (FallingBlockEntity fb : debris) {
-            Vec3 w = windAt(fb.getX(), fb.getY(), fb.getZ(), force, 1.6);
-            if (w == Vec3.ZERO) continue;
-            Vec3 v = fb.getDeltaMovement().add(w.x, w.y + 0.03 * force, w.z); // counteract part of gravity
-            double max = 1.8;
-            if (v.lengthSqr() > max * max) v = v.normalize().scale(max);
+        var it = debris.iterator();
+        while (it.hasNext()) {
+            Debris d = it.next();
+            FallingBlockEntity fb = d.entity;
+            d.age++;
+            if (fb.isRemoved() || d.age > 400) {
+                land(d);
+                it.remove();
+                continue;
+            }
+            Vec3 v = fb.getDeltaMovement();
+            Vec3 w = wind.at(fb.getX(), fb.getY() + 0.5, fb.getZ());
+            Vec3 rel = w.subtract(v);
+            v = v.add(rel.scale(d.drag * Math.min(1.5, 0.35 + rel.length())));
+            double speed = v.length();
+            if (speed > 2.0) v = v.scale(2.0 / speed);
+
+            if (speed > 0.5) {
+                // Smashes through glass, leaves and plants in its path.
+                BlockPos ahead = BlockPos.containing(fb.position().add(v));
+                BlockState s = level.getBlockState(ahead);
+                if (isFragile(s) && DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean() && DisasterProtection.canModify(level, ahead, s)) {
+                    level.destroyBlock(ahead, false);
+                }
+                // Hits creatures in mid-air: damage scales with speed and mass.
+                for (LivingEntity le : level.getEntitiesOfClass(LivingEntity.class, fb.getBoundingBox().inflate(0.4),
+                        le -> !d.hit.contains(le.getId()) && !le.isSpectator())) {
+                    d.hit.add(le.getId());
+                    le.hurtServer(level, level.damageSources().fallingBlock(fb), (float) (1 + speed * 7 * d.mass));
+                    le.push(v.x * 0.5 * d.mass, 0.2, v.z * 0.5 * d.mass);
+                    level.playSound(null, le.getX(), le.getY(), le.getZ(), ModRegistries.DEBRIS_THUD.get(), SoundSource.BLOCKS, 1.2f, 1.2f);
+                }
+            }
             fb.setDeltaMovement(v);
             fb.hurtMarked = true;
+            d.lastPos = fb.position();
+        }
+    }
+
+    /** Impact: the block's own material sound plus a heavy thud, scaled by mass. */
+    private void land(Debris d) {
+        Vec3 p = d.lastPos;
+        var sound = d.state.getSoundType();
+        level.playSound(null, p.x, p.y, p.z, sound.getBreakSound(), SoundSource.BLOCKS, 1.3f, sound.getPitch() * 0.8f);
+        if (d.mass >= 0.5) {
+            level.playSound(null, p.x, p.y, p.z, ModRegistries.DEBRIS_THUD.get(), SoundSource.BLOCKS,
+                    (float) (0.8 + d.mass), 0.8f + random.nextFloat() * 0.3f);
         }
     }
 

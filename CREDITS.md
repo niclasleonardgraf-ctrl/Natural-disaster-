@@ -9,10 +9,15 @@ Synthesized from filtered noise by `tools/gen_sounds.py`; regenerate any time. D
 
 | File | Description |
 |---|---|
-| `tornado_roar.ogg` | close roar loop (low rush + gritty mid band, slow surges) |
-| `tornado_distant.ogg` | far freight-train rumble loop |
-| `rumble1-3.ogg` | distant thunder-like rumbles (warning signs) |
+| `tornado_distant.ogg` | far "freight train" rumble loop (resonant 50–300 Hz, rhythmic chug) |
+| `tornado_roar.ogg` | mid-range rushing roar loop |
+| `tornado_core.ogg` | overwhelming close-range roar loop with debris crackle |
+| `wind_howl.ogg` | wind whistling around obstacles (pitch-sweeping resonances) |
+| `rumble1-3.ogg` | rolling thunder (crack + rumble) |
 | `wind_gust1-3.ogg` | wind gusts |
+| `debris_thud1-3.ogg` | heavy debris impacts |
+| `wood_snap1-3.ogg` | tree trunks snapping (crack, splinters, creak) |
+| `debris_rattle1-3.ogg` | small debris pelting the surroundings |
 | `tsunami_roar.ogg` | close loop of the bore (deep churning roar, white-water hiss, grinding and snapping debris) |
 | `tsunami_surf.ogg` | distant heavy-surf loop (slow swells over a low ocean rumble) |
 | `tsunami_crash1-3.ogg` | one-shot impacts (thump, broadband crash, splintering wood, seething tail) |
