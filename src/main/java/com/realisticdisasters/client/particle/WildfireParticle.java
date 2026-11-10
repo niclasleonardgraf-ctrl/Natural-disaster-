@@ -27,25 +27,31 @@ import org.joml.Quaternionf;
  * <li>FLAME: an upright, animated flame tongue (looping sprite frames), self-lit.</li>
  * <li>EMBER: glowing spark lofted by the plume and carried downwind.</li>
  * <li>ASH: grey-white flakes tumbling down.</li>
+ * <li>WHIRL_FLAME / WHIRL_SMOKE: flame and smoke spiralling up a fire whirl (args: disaster id, height fraction,
+ *     radius jitter); they follow the whirl as it moves.</li>
  * </ul>
  * Smoke spawn args: xAux = disaster id (-1 = none), yAux = shade (0 pale grass smoke .. 1 dark forest smoke),
  * zAux = ground height. Flame args: size, rise speed, variant. Ember / ash args: velocity.
  */
 public class WildfireParticle extends SingleQuadParticle {
-    public enum Kind { SMOKE, BILLOW, PALL, SMOLDER, FLAME, EMBER, ASH }
+    public enum Kind { SMOKE, BILLOW, PALL, SMOLDER, FLAME, EMBER, ASH, WHIRL_FLAME, WHIRL_SMOKE }
 
     private static final int FLAME_FRAMES = 8;
 
     private final Kind kind;
     private final SpriteSet sprites;
     private int disasterId;
-    private final double groundY;
+    private double groundY;
     private final float shade;
     private final float baseSize;
     private final float maxAlpha;
     private final float phase;
     private final float spin;
     private final int variant;
+    // fire whirl orbit
+    private final boolean whirl;
+    private float whirlFrac, jitter;
+    private double orbitAngle;
     // wind cached from the disaster (kept when it ends so the smoke keeps drifting)
     private double windX, windZ;
     private float windSpeed = 0.25f;
@@ -63,11 +69,23 @@ public class WildfireParticle extends SingleQuadParticle {
         this.hasPhysics = false;
         this.friction = 1f;
         boolean smoke = kind == Kind.SMOKE || kind == Kind.BILLOW || kind == Kind.PALL || kind == Kind.SMOLDER;
-        this.disasterId = smoke ? (int) xa : -1;
+        this.whirl = kind == Kind.WHIRL_FLAME || kind == Kind.WHIRL_SMOKE;
+        this.disasterId = smoke || whirl ? (int) xa : -1;
         this.shade = smoke ? Mth.clamp((float) ya, 0f, 1f) : 0f;
         this.groundY = smoke ? za : y;
-        this.variant = kind == Kind.FLAME ? Mth.clamp((int) za, 0, 1) : 0;
-        if (smoke) {
+        this.variant = kind == Kind.FLAME ? Mth.clamp((int) za, 0, 1) : kind == Kind.WHIRL_FLAME ? r.nextInt(2) : 0;
+        if (whirl) {
+            whirlFrac = (float) ya;
+            jitter = (float) za;
+            xd = yd = zd = 0;
+            ClientDisaster d = ClientDisasters.get(disasterId);
+            float h = d == null ? 20f : Math.max(10f, d.data(WildfireDisaster.D_WHIRL_HEIGHT));
+            groundY = y - whirlFrac * h;
+            if (d != null) {
+                double cx = d.pos().x + d.data(WildfireDisaster.D_WHIRL_X), cz = d.pos().z + d.data(WildfireDisaster.D_WHIRL_Z);
+                orbitAngle = Math.atan2(z - cz, x - cx);
+            }
+        } else if (smoke) {
             xd = yd = zd = 0;
             windX = 1;
             pullWind();
@@ -110,9 +128,21 @@ public class WildfireParticle extends SingleQuadParticle {
                 maxAlpha = 0.95f;
                 spin = 0;
             }
+            case WHIRL_FLAME -> {
+                lifetime = 30 + r.nextInt(24);
+                baseSize = 0.6f + r.nextFloat() * 0.6f;
+                maxAlpha = 0.95f;
+                spin = 0;
+            }
+            case WHIRL_SMOKE -> {
+                lifetime = 80 + r.nextInt(50);
+                baseSize = 1.4f + r.nextFloat() * 1.4f;
+                maxAlpha = 0.55f + r.nextFloat() * 0.25f;
+                spin = (r.nextFloat() - 0.5f) * 0.03f;
+            }
             case EMBER -> {
                 lifetime = 30 + r.nextInt(60);
-                baseSize = 0.04f + r.nextFloat() * 0.06f;
+                baseSize = 0.07f + r.nextFloat() * 0.09f;
                 maxAlpha = 1f;
                 spin = 0;
                 friction = 0.96f;
@@ -128,8 +158,45 @@ public class WildfireParticle extends SingleQuadParticle {
         }
         this.quadSize = baseSize;
         this.roll = this.oRoll = r.nextFloat() * Mth.TWO_PI;
-        if (kind == Kind.FLAME) updateFlameSprite();
+        if (kind == Kind.FLAME || kind == Kind.WHIRL_FLAME) updateFlameSprite();
         updateLook();
+    }
+
+    /** Orbit, rise and flare out along the fire whirl; dissipate upward once it is gone. */
+    private void tickWhirl() {
+        ClientDisaster d = ClientDisasters.get(disasterId);
+        float power = d == null ? 0f : d.data(WildfireDisaster.D_WHIRL_POWER);
+        if (d == null || power < 0.02f) {
+            yd = 0.06;
+            x += xd;
+            y += yd;
+            z += zd;
+            age += 2;
+            return;
+        }
+        double cx = d.pos().x + d.data(WildfireDisaster.D_WHIRL_X), cz = d.pos().z + d.data(WildfireDisaster.D_WHIRL_Z);
+        float height = Math.max(10f, d.data(WildfireDisaster.D_WHIRL_HEIGHT));
+        boolean flame = kind == Kind.WHIRL_FLAME;
+        if ((age & 7) == 0) pullWind();
+        whirlFrac += flame ? 0.026f + jitter * 0.01f : 0.012f;
+        // the axis leans downwind with height and snakes slowly, like real whirls
+        double hb = whirlFrac * height;
+        double t = (level.getGameTime() % 100000) * 0.06;
+        cx += windX * windSpeed * hb * 0.16 + Math.sin(t + hb * 0.22) * 0.06 * hb;
+        cz += windZ * windSpeed * hb * 0.16 + Math.cos(t * 0.8 + hb * 0.19) * 0.06 * hb;
+        // the column flares out with height; the core spins fastest (angular momentum)
+        double r = flame ? (0.08 + 0.3 * jitter) * (1 + whirlFrac * 0.8) : (1.0 + 1.4 * jitter) * (1 + whirlFrac * 1.9);
+        double vt = 0.6 * power;
+        orbitAngle += vt / Math.max(0.35, r) * (flame ? 1.15 : 0.8);
+        double nx = cx + Math.cos(orbitAngle) * r, nz = cz + Math.sin(orbitAngle) * r;
+        double ny = groundY + whirlFrac * height;
+        xd = nx - x;
+        yd = ny - y;
+        zd = nz - z;
+        x = nx;
+        y = ny;
+        z = nz;
+        if (flame) updateFlameSprite();
     }
 
     private void pullWind() {
@@ -171,6 +238,12 @@ public class WildfireParticle extends SingleQuadParticle {
         oRoll = roll;
         if (age++ >= lifetime) {
             remove();
+            return;
+        }
+        if (whirl) {
+            tickWhirl();
+            roll += spin;
+            updateLook();
             return;
         }
         if ((age & 7) == 0) pullWind();
@@ -253,6 +326,17 @@ public class WildfireParticle extends SingleQuadParticle {
                 setColor(1f, 1f, 1f);
                 setAlpha(maxAlpha * Mth.clamp(t * 6f, 0f, 1f) * Mth.clamp((1f - t) * 3f, 0f, 1f));
             }
+            case WHIRL_FLAME -> {
+                // flames high up the whirl burn out into smoke
+                setColor(1f, 1f, 1f);
+                setAlpha(maxAlpha * Mth.clamp(t * 6f, 0f, 1f) * Mth.clamp((1f - t) * 3f, 0f, 1f)
+                        * Mth.clamp((0.95f - whirlFrac) * 3f, 0f, 1f));
+            }
+            case WHIRL_SMOKE -> {
+                float glow = Mth.clamp(1f - whirlFrac * 2.5f, 0f, 1f) * 0.6f;
+                setColor(Mth.lerp(glow, 0.32f, 1f), Mth.lerp(glow, 0.29f, 0.5f), Mth.lerp(glow, 0.26f, 0.2f));
+                setAlpha(maxAlpha * fade);
+            }
             case EMBER -> {
                 setColor(1f, Mth.lerp(t, 0.8f, 0.3f), Mth.lerp(t, 0.35f, 0.05f)); // yellow-white -> dull red
                 setAlpha(Mth.clamp((1f - t) * 3f, 0f, 1f));
@@ -275,6 +359,8 @@ public class WildfireParticle extends SingleQuadParticle {
             case PALL -> baseSize * (0.7f + 0.9f * t);
             case SMOLDER -> baseSize * (0.6f + 2.2f * t);
             case FLAME -> baseSize * (0.7f + 0.3f * Mth.clamp(t * 4f, 0f, 1f)) * (1f - 0.35f * t);
+            case WHIRL_FLAME -> baseSize * (1.2f - 0.7f * Mth.clamp(whirlFrac, 0f, 1f));
+            case WHIRL_SMOKE -> baseSize * (0.7f + 1.6f * Mth.clamp(whirlFrac, 0f, 1.5f));
             case EMBER -> baseSize * (0.8f + 0.2f * Mth.sin((age + partialTick) * 1.9f + phase));
             default -> baseSize;
         };
@@ -282,7 +368,8 @@ public class WildfireParticle extends SingleQuadParticle {
 
     /** Horizontal extent for culling big particles by size, not by their centre (see QuadParticleGroupMixin). */
     public float cullRadius() {
-        return kind == Kind.SMOKE || kind == Kind.BILLOW || kind == Kind.PALL || kind == Kind.FLAME ? getQuadSize(0f) : 0f;
+        return kind == Kind.SMOKE || kind == Kind.BILLOW || kind == Kind.PALL || kind == Kind.FLAME
+                || kind == Kind.WHIRL_FLAME || kind == Kind.WHIRL_SMOKE ? getQuadSize(0f) : 0f;
     }
 
     @Override
@@ -301,6 +388,13 @@ public class WildfireParticle extends SingleQuadParticle {
                 return;
             }
         }
+        if (kind == Kind.EMBER) {
+            // motion streak: turn the sprite so its tail trails behind the ember's screen-space velocity
+            org.joml.Vector3fc left = camera.leftVector(), up = camera.upVector();
+            double sx = -(xd * left.x() + yd * left.y() + zd * left.z());
+            double sy = xd * up.x() + yd * up.y() + zd * up.z();
+            if (sx * sx + sy * sy > 1.0e-6) roll = oRoll = (float) Math.atan2(sy, sx);
+        }
         extractOriented(state, camera, partialTick);
         alpha = keep;
     }
@@ -309,7 +403,7 @@ public class WildfireParticle extends SingleQuadParticle {
         Quaternionf q = new Quaternionf();
         switch (kind) {
             // flames stay upright and only turn to face the camera around the vertical axis
-            case FLAME -> FacingCameraMode.LOOKAT_Y.setRotation(q, camera, partialTick);
+            case FLAME, WHIRL_FLAME -> FacingCameraMode.LOOKAT_Y.setRotation(q, camera, partialTick);
             default -> {
                 super.extract(state, camera, partialTick);
                 return;
@@ -320,7 +414,8 @@ public class WildfireParticle extends SingleQuadParticle {
 
     @Override
     protected int getLightCoords(float a) {
-        if (kind == Kind.FLAME || kind == Kind.EMBER) return LightCoordsUtil.FULL_BRIGHT;
+        if (kind == Kind.FLAME || kind == Kind.EMBER || kind == Kind.WHIRL_FLAME) return LightCoordsUtil.FULL_BRIGHT;
+        if (kind == Kind.WHIRL_SMOKE) return LightCoordsUtil.pack(12, LightCoordsUtil.sky(super.getLightCoords(a)));
         int lc = super.getLightCoords(a);
         if (kind == Kind.SMOKE || kind == Kind.BILLOW) {
             // the base of the column is lit by the fire (visible as an orange glow at night)

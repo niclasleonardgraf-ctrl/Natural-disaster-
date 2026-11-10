@@ -442,13 +442,14 @@ def smoke_billow(seed, size=64):
 
 
 def glow_ember(seed, size=16):
-    """Hot spark: tiny white-hot core with a soft radial glow (alpha falloff). Tinted in code."""
+    """Flying spark: a white-hot head with a glowing motion streak along +x (oriented along the ember's velocity
+    in code, like a camera's motion blur). Tinted in code."""
     import numpy as np
     rng = np.random.default_rng(seed)
     y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
-    sx = 1.0 + rng.uniform(0, 0.6)  # slightly elongated, like a streak
-    d = np.sqrt((x * sx) ** 2 + y * y)
-    a = np.clip(1 - d, 0, 1) ** 2.4
+    sy = 3.0 + rng.uniform(0, 1.0)  # thin streak
+    d = np.sqrt((np.where(x > 0.45, (x - 0.45) * 3.0, (x - 0.45) * 0.62)) ** 2 + (y * sy) ** 2)
+    a = np.clip(1 - d, 0, 1) ** 1.4
     core = np.clip(1 - d * 2.5, 0, 1)
     v = np.clip(0.75 + 0.25 * core, 0, 1)
     rgb = (v * 255).astype("uint8")

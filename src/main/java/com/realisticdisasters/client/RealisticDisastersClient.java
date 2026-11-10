@@ -46,5 +46,7 @@ public class RealisticDisastersClient {
         event.registerSpriteSet(ModRegistries.SMOKE_PALL.get(), s -> WildfireParticle.provider(WildfireParticle.Kind.PALL, s));
         event.registerSpriteSet(ModRegistries.SMOLDER_SMOKE.get(), s -> WildfireParticle.provider(WildfireParticle.Kind.SMOLDER, s));
         event.registerSpriteSet(ModRegistries.FIRE_TONGUE.get(), s -> WildfireParticle.provider(WildfireParticle.Kind.FLAME, s));
+        event.registerSpriteSet(ModRegistries.FIRE_WHIRL.get(), s -> WildfireParticle.provider(WildfireParticle.Kind.WHIRL_FLAME, s));
+        event.registerSpriteSet(ModRegistries.WHIRL_SMOKE.get(), s -> WildfireParticle.provider(WildfireParticle.Kind.WHIRL_SMOKE, s));
     }
 }

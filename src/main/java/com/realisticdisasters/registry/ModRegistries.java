@@ -43,6 +43,8 @@ public final class ModRegistries {
     public static final DeferredHolder<SoundEvent, SoundEvent> WILDFIRE_ROAR = sound("disaster.wildfire.roar");
     public static final DeferredHolder<SoundEvent, SoundEvent> WILDFIRE_DISTANT = sound("disaster.wildfire.distant");
     public static final DeferredHolder<SoundEvent, SoundEvent> WILDFIRE_POP = sound("disaster.wildfire.pop");
+    public static final DeferredHolder<SoundEvent, SoundEvent> WILDFIRE_WHOOSH = sound("disaster.wildfire.whoosh");
+    public static final DeferredHolder<SoundEvent, SoundEvent> WILDFIRE_WHIRL = sound("disaster.wildfire.whirl");
 
     // Particles
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FUNNEL_CLOUD =
@@ -77,6 +79,10 @@ public final class ModRegistries {
             PARTICLES.register("smolder_smoke", () -> new SimpleParticleType(false));
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FIRE_TONGUE =
             PARTICLES.register("fire_tongue", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FIRE_WHIRL =
+            PARTICLES.register("fire_whirl", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> WHIRL_SMOKE =
+            PARTICLES.register("whirl_smoke", () -> new SimpleParticleType(true));
 
     // Blocks
     /** Short-lived flame the wildfire places; burns out by itself and never spreads (the disaster drives spread). */

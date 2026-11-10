@@ -54,5 +54,7 @@
   "block.realisticdisasters.charred_log": "Charred Log",
   "realisticdisasters.configuration.wildfire": "Wildfire",
   "block.realisticdisasters.scorched_earth": "Scorched Earth",
-  "block.realisticdisasters.scorched_leaves": "Scorched Leaves"
+  "block.realisticdisasters.scorched_leaves": "Scorched Leaves",
+  "subtitles.realisticdisasters.wildfire.whoosh": "Tree torches",
+  "subtitles.realisticdisasters.wildfire.whirl": "Fire whirl roars"
 }

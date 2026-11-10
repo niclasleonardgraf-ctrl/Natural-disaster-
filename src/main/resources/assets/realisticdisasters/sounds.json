@@ -139,5 +139,13 @@
         "attenuation_distance": 32
       }
     ]
+  },
+  "disaster.wildfire.whoosh": {
+    "subtitle": "subtitles.realisticdisasters.wildfire.whoosh",
+    "sounds": [{ "name": "realisticdisasters:wildfire_whoosh", "attenuation_distance": 96 }]
+  },
+  "disaster.wildfire.whirl": {
+    "subtitle": "subtitles.realisticdisasters.wildfire.whirl",
+    "sounds": [{ "name": "realisticdisasters:wildfire_whirl", "stream": true, "attenuation_distance": 96 }]
   }
 }

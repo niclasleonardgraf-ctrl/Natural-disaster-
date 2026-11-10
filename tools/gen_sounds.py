@@ -332,6 +332,35 @@ def fire_pop(rng, seconds=1.2):
     return _wf_normalize(x, 0.9)
 
 
+def fire_whoosh(rng, seconds=2.6):
+    """One-shot: a tree torching - a deep rushing whoosh as the crown goes up, with a burst of crackle."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, seconds, n)
+    env = np.minimum(t / 0.18, 1) * np.exp(-np.maximum(t - 0.18, 0) * 1.6)
+    rush = _wf_bandpass(rng.standard_normal(n), 60, 900) * env
+    hiss = _wf_bandpass(rng.standard_normal(n), 900, 5000) * env * 0.25
+    clicks = np.zeros(n)
+    for _ in range(90):
+        at = int(rng.integers(0, int(n * 0.6)))
+        length = int(rng.integers(60, 700))
+        clicks[at:at + length] += rng.standard_normal(min(length, n - at)) * np.exp(-np.linspace(0, 8, min(length, n - at))) * rng.random() ** 2
+    x = rush * 1.4 + hiss + _wf_bandpass(clicks, 700, 9000) * 0.6 * env
+    return _wf_normalize(x, 0.9)
+
+
+def fire_whirl(rng, seconds=6.0):
+    """Loop: a fire whirl - jet-like roar whose brightness pulses as the vortex rotates."""
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    low = _wf_fast_lowpass(rng.standard_normal(n), 300)
+    mid = _wf_bandpass(rng.standard_normal(n), 300, 1600)
+    high = _wf_bandpass(rng.standard_normal(n), 1600, 6000)
+    rot = 0.5 + 0.5 * np.sin(2 * np.pi * (4.0 + 1.5 * _wf_smooth_noise(n, 0.5, rng)) * t)  # rotation pulse
+    x = low * 1.2 + mid * (0.35 + 0.45 * rot) + high * (0.08 + 0.2 * rot)
+    x *= 0.75 + 0.25 * _wf_smooth_noise(n, 0.8, rng)
+    return _wf_normalize(_wf_loopable(x), 0.85)
+
+
 def main():
     rng = np.random.default_rng(1234)
     write_ogg("tornado_distant", tornado_distant(rng))
@@ -355,6 +384,8 @@ def write_wildfire():
     write_ogg("wildfire_distant", fire_distant(rng))
     for i in range(1, 4):
         write_ogg(f"wildfire_pop{i}", fire_pop(rng))
+    write_ogg("wildfire_whoosh", fire_whoosh(rng))
+    write_ogg("wildfire_whirl", fire_whirl(rng))
 
 
 if __name__ == "__main__":

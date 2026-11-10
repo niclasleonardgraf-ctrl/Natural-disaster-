@@ -10,6 +10,9 @@ import com.realisticdisasters.registry.ModRegistries;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
+import net.minecraft.client.resources.sounds.SoundInstance;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ParticleStatus;
 import net.minecraft.tags.BlockTags;
@@ -60,8 +63,10 @@ public final class WildfireVisual implements DisasterVisual {
         long time;
         Vec3 nearest;
         double nearestDist = Double.MAX_VALUE;
-        FireLoopSound crackle, roar;
+        FireLoopSound crackle, roar, whirl;
         DisasterLoopSound distant;
+        int flareCooldown;
+        Vec3 whirlPos;
     }
 
     private static State state(ClientDisaster d) {
@@ -77,6 +82,11 @@ public final class WildfireVisual implements DisasterVisual {
 
     private static void updatePoints(ClientDisaster d, ClientLevel level, State st, Vec3 cam) {
         st.time++;
+        if (st.flareCooldown > 0) st.flareCooldown--;
+        if (whirlPower(d) > 0.03f) {
+            Vec3 c = whirlCentre(d);
+            st.whirlPos = new Vec3(c.x, level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, Mth.floor(c.x), Mth.floor(c.z)) + 4, c.z);
+        }
         if (d.data != st.lastData) {
             st.lastData = d.data;
             int n = (int) (d.data.length > WildfireDisaster.D_POINT_COUNT ? d.data[WildfireDisaster.D_POINT_COUNT] : 0);
@@ -84,7 +94,10 @@ public final class WildfireVisual implements DisasterVisual {
             for (int k = 0; k < n; k++) {
                 int i = WildfireDisaster.D_POINTS + k * 2;
                 if (i + 1 >= d.data.length) break;
-                double x = c.x + d.data[i], z = c.z + d.data[i + 1];
+                float rawZ = d.data[i + 1];
+                boolean crownFire = rawZ > WildfireDisaster.CROWN_FLAG / 2;
+                if (crownFire) rawZ -= WildfireDisaster.CROWN_FLAG;
+                double x = c.x + d.data[i], z = c.z + rawZ;
                 int bx = Mth.floor(x), bz = Mth.floor(z);
                 int slot = st.head;
                 st.head = (st.head + 1) % MAX_POINTS;
@@ -94,7 +107,10 @@ public final class WildfireVisual implements DisasterVisual {
                 st.ground[slot] = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, bx, bz);
                 st.top[slot] = level.getHeight(Heightmap.Types.WORLD_SURFACE, bx, bz);
                 BlockState topBlock = level.getBlockState(new BlockPos(bx, st.top[slot] - 1, bz));
-                st.crown[slot] = topBlock.is(BlockTags.LEAVES) || topBlock.is(BlockTags.LOGS);
+                boolean canopy = topBlock.is(BlockTags.LEAVES) || topBlock.is(BlockTags.LOGS);
+                // the server says whether the fire is in the crowns; a surface fire under a canopy stays low
+                st.crown[slot] = crownFire && canopy;
+                if (st.crown[slot]) flare(level, st, x, st.top[slot], z, cam);
                 st.flameBlock[slot] = level.getBlockState(new BlockPos(bx, st.top[slot], bz)).is(ModRegistries.WILDFIRE_FLAME.get())
                         || level.getBlockState(new BlockPos(bx, st.ground[slot], bz)).is(ModRegistries.WILDFIRE_FLAME.get());
                 st.expire[slot] = st.time + POINT_LIFE + RANDOM.nextInt(20);
@@ -118,6 +134,73 @@ public final class WildfireVisual implements DisasterVisual {
             Vec3 c = d.pos();
             st.nearest = new Vec3(c.x, c.y + 1.5, c.z);
             st.nearestDist = Math.max(0, horizontalDistance(d, cam) - d.radius * 0.7);
+        }
+    }
+
+    /**
+     * A tree torching: the crown goes up in a column of flame several times its height with a burst of embers and a
+     * deep whoosh. Rate-limited so a running crown fire is a series of flare-ups, not a constant blur.
+     */
+    private static void flare(ClientLevel level, State st, double x, int top, double z, Vec3 cam) {
+        if (st.flareCooldown > 0) return;
+        double dist = Math.sqrt((x - cam.x) * (x - cam.x) + (z - cam.z) * (z - cam.z));
+        if (dist > 140) return;
+        st.flareCooldown = 12 + RANDOM.nextInt(30);
+        float density = ClientConfig.PARTICLE_DENSITY.get().floatValue();
+        int flames = count(10 * density);
+        for (int n = 0; n < flames; n++) {
+            float size = 2.2f + RANDOM.nextFloat() * 2.6f;
+            level.addParticle(ModRegistries.FIRE_TONGUE.get(), true, true, x + RANDOM.nextGaussian() * 1.2,
+                    top - 1 + size * 0.9 + RANDOM.nextDouble() * 3, z + RANDOM.nextGaussian() * 1.2,
+                    size, 0.08 + RANDOM.nextDouble() * 0.1, RANDOM.nextInt(2));
+        }
+        int sparks = count(24 * density);
+        for (int n = 0; n < sparks; n++) {
+            level.addParticle(ModRegistries.EMBER.get(), true, false, x + RANDOM.nextGaussian(), top + RANDOM.nextDouble() * 3,
+                    z + RANDOM.nextGaussian(), RANDOM.nextGaussian() * 0.12, 0.35 + RANDOM.nextDouble() * 0.4, RANDOM.nextGaussian() * 0.12);
+        }
+        Minecraft.getInstance().getSoundManager().play(new SimpleSoundInstance(ModRegistries.WILDFIRE_WHOOSH.get().location(),
+                SoundSource.BLOCKS, 1.6f + RANDOM.nextFloat() * 0.6f, 0.8f + RANDOM.nextFloat() * 0.3f, RANDOM, false, 0,
+                SoundInstance.Attenuation.LINEAR, x, top + 2, z, false));
+    }
+
+    private static float whirlPower(ClientDisaster d) {
+        return Mth.clamp(d.data(WildfireDisaster.D_WHIRL_POWER), 0f, 1.2f);
+    }
+
+    private static Vec3 whirlCentre(ClientDisaster d) {
+        return new Vec3(d.pos().x + d.data(WildfireDisaster.D_WHIRL_X), d.pos().y, d.pos().z + d.data(WildfireDisaster.D_WHIRL_Z));
+    }
+
+    /** Spinning column of flame and smoke for an active fire whirl. */
+    private void spawnWhirl(ClientDisaster d, ClientLevel level, Camera camera, Vec3 cam, float density) {
+        float power = whirlPower(d);
+        if (power < 0.03f) return;
+        Vec3 c = whirlCentre(d);
+        int ground = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, Mth.floor(c.x), Mth.floor(c.z));
+        float height = Math.max(10f, d.data(WildfireDisaster.D_WHIRL_HEIGHT));
+        double dist = Math.sqrt((c.x - cam.x) * (c.x - cam.x) + (c.z - cam.z) * (c.z - cam.z));
+        AABB box = new AABB(c.x - 6, ground - 1, c.z - 6, c.x + 6, ground + height + 6, c.z + 6);
+        float lod = dist < 96 ? 1f : dist < 200 ? 0.6f : 0.3f;
+        if (camera.getCullFrustum() != null && !camera.getCullFrustum().isVisible(box)) lod *= 0.1f;
+        int flames = count(40f * power * density * lod);
+        for (int n = 0; n < flames; n++) {
+            float frac = (float) Math.pow(RANDOM.nextDouble(), 1.3) * 0.7f;
+            double a = RANDOM.nextDouble() * Math.PI * 2, r = 0.1 + RANDOM.nextDouble() * 0.3;
+            level.addParticle(ModRegistries.FIRE_WHIRL.get(), true, true, c.x + Math.cos(a) * r, ground + frac * height,
+                    c.z + Math.sin(a) * r, d.id, frac, RANDOM.nextFloat());
+        }
+        int smoke = count(6f * power * density * lod);
+        for (int n = 0; n < smoke; n++) {
+            float frac = 0.2f + RANDOM.nextFloat() * 0.5f;
+            double a = RANDOM.nextDouble() * Math.PI * 2, r = 1.5 + RANDOM.nextDouble() * 1.5;
+            level.addParticle(ModRegistries.WHIRL_SMOKE.get(), true, true, c.x + Math.cos(a) * r, ground + frac * height,
+                    c.z + Math.sin(a) * r, d.id, frac, RANDOM.nextFloat());
+        }
+        int sparks = count(3f * power * density * lod);
+        for (int n = 0; n < sparks; n++) {
+            level.addParticle(ModRegistries.EMBER.get(), true, false, c.x + RANDOM.nextGaussian(), ground + RANDOM.nextDouble() * height * 0.6,
+                    c.z + RANDOM.nextGaussian(), RANDOM.nextGaussian() * 0.25, 0.4 + RANDOM.nextDouble() * 0.4, RANDOM.nextGaussian() * 0.25);
         }
     }
 
@@ -183,6 +266,15 @@ public final class WildfireVisual implements DisasterVisual {
         float veryClose = 1f - smoothstep(3f, 24f, (float) distFront);
         out.shake(s * heat * veryClose * 0.18f * (0.4f + d.intensity * 0.12f));
         out.fovPulse(s * heat * veryClose * 0.7f);
+        // a fire whirl close by: roaring, buffeting wind
+        float wp = whirlPower(d);
+        if (wp > 0.03f) {
+            Vec3 wc = whirlCentre(d);
+            double dw = Math.sqrt((wc.x - cam.x) * (wc.x - cam.x) + (wc.z - cam.z) * (wc.z - cam.z));
+            float near = 1f - smoothstep(4f, 40f, (float) dw);
+            out.shake(wp * near * 0.35f);
+            out.fovPulse(wp * near);
+        }
     }
 
     // ------------------------------------------------------------------ particles + sound
@@ -241,6 +333,9 @@ public final class WildfireVisual implements DisasterVisual {
                     st.px[k] + RANDOM.nextGaussian() * 0.7, y, st.pz[k] + RANDOM.nextGaussian() * 0.7,
                     size, 0.02 + RANDOM.nextDouble() * 0.04, RANDOM.nextInt(2));
         }
+
+        // ---- fire whirl
+        spawnWhirl(d, level, camera, cam, density);
 
         // ---- smoke boiling off the flames (dark over forest, pale over grass)
         int smoke = count((4f + i * 2.2f) * scale);
@@ -350,6 +445,12 @@ public final class WildfireVisual implements DisasterVisual {
                     x -> x.strength() * heat(x) * (1.6 + x.intensity * 0.5), x -> 0.8 + 0.04 * (5 - x.intensity));
             sounds.play(st.roar);
         }
+        if (st.whirl == null || st.whirl.isStopped()) {
+            // Fire whirl: a jet-like roar that sits on the whirl.
+            st.whirl = new FireLoopSound(ModRegistries.WILDFIRE_WHIRL.get(), d, () -> st.whirlPos != null ? st.whirlPos : st.nearest,
+                    x -> whirlPower(x) * 3.0, x -> 0.9 + 0.15 * whirlPower(x));
+            sounds.play(st.whirl);
+        }
         if (st.distant == null || st.distant.isStopped()) {
             // Far layer: non-attenuated rushing rumble that fades with distance.
             st.distant = new DisasterLoopSound(ModRegistries.WILDFIRE_DISTANT.get(), d, false,
@@ -372,6 +473,7 @@ public final class WildfireVisual implements DisasterVisual {
         if (d.visualState instanceof State st) {
             if (st.crackle != null) st.crackle.end();
             if (st.roar != null) st.roar.end();
+            if (st.whirl != null) st.whirl.end();
             if (st.distant != null) st.distant.end();
         }
     }
