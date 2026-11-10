@@ -292,6 +292,65 @@ def flood_debris(seed, size=32):
     return Image.fromarray(np.dstack([col.astype("uint8"), (a * 255).astype("uint8")]), "RGBA")
 
 
+def periodic_field(rng, size, frames, waves, kmax, aniso=1.0, cycles=(1, 2)):
+    """Tileable (in x, y and time) noise: sum of plane waves with integer wave numbers. Returns [frames, size, size]."""
+    import numpy as np
+    y, x = np.mgrid[0:size, 0:size] / size
+    out = np.zeros((frames, size, size))
+    for _ in range(waves):
+        kx, ky = 0, 0
+        while kx == 0 and ky == 0:
+            kx, ky = rng.integers(-kmax, kmax + 1), rng.integers(-int(kmax * aniso), int(kmax * aniso) + 1)
+        amp = 1.0 / (kx * kx + ky * ky) ** 0.5
+        phase = rng.uniform(0, 2 * np.pi)
+        w = rng.integers(cycles[0], cycles[1] + 1) * rng.choice([-1, 1])
+        for f in range(frames):
+            out[f] += amp * np.sin(2 * np.pi * (kx * x + ky * y) + phase + 2 * np.pi * w * f / frames)
+    lo, hi = out.min(), out.max()
+    return (out - lo) / (hi - lo)
+
+
+def tsunami_block_textures(frames=32):
+    """Animated 16x16 block textures for the wave surface, at vanilla water's texel density so the wave and the
+    water blocks read as one body. Greyscale (tinted in code like vanilla water). Frames scroll down the face, as the
+    water tumbles forward."""
+    import numpy as np
+    rng = np.random.default_rng(4242)
+    size = 64  # one frame covers 4x4 blocks at 16 px per block, so the pattern doesn't repeat every block
+    out = os.path.join(ROOT, "assets", "realisticdisasters", "textures", "block")
+    os.makedirs(out, exist_ok=True)
+
+    # Turbulent water: vanilla-like grey with stronger, streaky churn; more opaque than calm water (silt and air).
+    churn = periodic_field(rng, size, frames, 40, 10, aniso=1.6)
+    streak = periodic_field(rng, size, frames, 24, 14, aniso=2.5)
+    water = np.zeros((size * frames, size, 4), dtype=np.uint8)
+    for f in range(frames):
+        shift = (f * size) // frames                    # one full tile of downward motion per loop
+        c = np.roll(churn[f], shift, axis=0)
+        st = np.roll(streak[f], shift, axis=0)
+        luma = 128 + 70 * c + 35 * (st - 0.5)
+        water[f * size:(f + 1) * size, :, 0:3] = np.clip(luma, 0, 255)[:, :, None]
+        water[f * size:(f + 1) * size, :, 3] = 226
+    Image.fromarray(water, "RGBA").save(os.path.join(out, "tsunami_water.png"))
+
+    # White water: dense aerated foam with lacy gaps and grey shading between the bubbles.
+    body = periodic_field(rng, size, frames, 40, 7)
+    fine = periodic_field(rng, size, frames, 48, 18)
+    foam = np.zeros((size * frames, size, 4), dtype=np.uint8)
+    for f in range(frames):
+        shift = (2 * f * size) // frames
+        b = np.roll(body[f], shift, axis=0)
+        fi = np.roll(fine[f], shift, axis=0)
+        luma = 196 + 59 * fi - 30 * (1 - b)
+        alpha = np.clip((0.35 + 0.9 * b + 0.25 * (fi - 0.5)) * 255, 60, 255)
+        foam[f * size:(f + 1) * size, :, 0:3] = np.clip(luma, 0, 255)[:, :, None]
+        foam[f * size:(f + 1) * size, :, 3] = alpha
+    Image.fromarray(foam, "RGBA").save(os.path.join(out, "tsunami_foam.png"))
+    for name in ("tsunami_water", "tsunami_foam"):
+        with open(os.path.join(out, name + ".png.mcmeta"), "w") as fh:
+            fh.write('{\n  "animation": {\n    "frametime": 2\n  }\n}\n')
+
+
 def write(img, name):
     os.makedirs(PARTICLES, exist_ok=True)
     img.save(os.path.join(PARTICLES, name + ".png"))
@@ -318,6 +377,8 @@ def main():
     env = os.path.join(ROOT, "assets", "minecraft", "textures", "environment")
     os.makedirs(env, exist_ok=True)
     realistic_rain(900).save(os.path.join(env, "rain.png"))
+
+    tsunami_block_textures()
 
     # 16x16 mod icon (tornado silhouette on a storm sky), upscaled with nearest neighbour for the mod list.
     icon = Image.new("RGBA", (16, 16), (78, 91, 71, 255))

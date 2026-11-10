@@ -31,8 +31,8 @@ import net.minecraft.world.phys.Vec3;
  * <ul>
  *   <li>No storm: the weather stays as it is. Only spray haze thickens near the front.</li>
  *   <li>The sea draws back, leaving a foam line along the retreating edge and fish stranded on the seabed (server).</li>
- *   <li>The wave is a turbulent bore, not a towering curl: a churning white-water front with a foam toe racing
- *       ahead, dark water behind it, and spray exploding wherever it hits something.</li>
+ *   <li>The wave is a turbulent bore, not a towering curl. It is drawn as water by {@link WaveRenderer} (one body
+ *       with the sea and the flood); particles only add droplets off the crest and splashes where it hits something.</li>
  *   <li>On land the water turns from turbid grey-green to dark brown and carries debris (also see {@link FloodTint}).
  *       It keeps rising after the front passes, a second surge rolls in, then the backwash drags everything seaward.</li>
  * </ul>
@@ -53,6 +53,9 @@ public final class TsunamiVisual implements DisasterVisual {
         int nextRumble = 30;
         int nextCrash = 10;
         float lastFront = Float.NaN, lastSurge = Float.NaN;
+        // Unsmoothed fronts, extrapolated between server packets, so the drawn wave stays on the real water's edge.
+        float rawFront = Float.NaN, rawSpeed, predFront, prevPred;
+        int rawAge;
         float frontSpeed, surgeSpeed;
         boolean landfall;
         int impact;      // ticks left of the landfall eruption
@@ -150,6 +153,30 @@ public final class TsunamiVisual implements DisasterVisual {
         Frame f = Frame.of(d);
         if (!Float.isNaN(st.lastFront)) st.frontSpeed += ((f.front() - st.lastFront) - st.frontSpeed) * 0.3f;
         if (!Float.isNaN(st.lastSurge)) st.surgeSpeed += ((f.surge() - st.lastSurge) - st.surgeSpeed) * 0.3f;
+        // The wave itself: a water surface joined to the real water behind and ahead (see WaveRenderer).
+        java.util.List<WaveRenderer.Front> fronts = new java.util.ArrayList<>(2);
+        float raw = d.data.length > TsunamiDisaster.D_FRONT ? d.data[TsunamiDisaster.D_FRONT] : f.front();
+        if (Float.isNaN(st.rawFront) || Math.abs(raw - st.rawFront) > 8f) {
+            st.rawFront = raw;
+            st.predFront = st.prevPred = raw;
+            st.rawAge = 0;
+        } else if (raw != st.rawFront) {
+            st.rawSpeed = Math.max(0f, (raw - st.rawFront) / Math.max(1, st.rawAge));
+            st.rawFront = raw;
+            st.rawAge = 0;
+        }
+        st.rawAge++;
+        st.prevPred = st.predFront;
+        float target = st.rawFront + st.rawSpeed * st.rawAge;
+        st.predFront += (target - st.predFront) * 0.6f;
+        if (f.wall() > 0.02f) {
+            fronts.add(sampleFront(level, f, st.prevPred, st.predFront, f.crest(), f.wall()));
+        }
+        if (f.surgeWall() > 0.02f) {
+            fronts.add(sampleFront(level, f, Float.isNaN(st.lastSurge) ? f.surge() : st.lastSurge, f.surge(),
+                    Math.max(1.5f, f.crest() * 0.6f), f.surgeWall()));
+        }
+        WaveRenderer.set(d.id, fronts);
         st.lastFront = f.front();
         st.lastSurge = f.surge();
         FloodTint.update(d.id, new FloodTint.Zone(f.px(), f.pz(), f.dx(), f.dz(), f.halfWidth(), f.reach(), (int) f.waterY()));
@@ -216,51 +243,11 @@ public final class TsunamiVisual implements DisasterVisual {
         float baseScale = 1f + (float) Math.max(0, toFront - 80) / 160f;
         WaveParticle.sizeScale = baseScale;
 
-        // Steep face: churning white water, darker toward the base.
-        int face = count(budget * 0.38f);
-        for (int i = 0; i < face; i++) {
-            double l = lateralSample(f, camLat);
-            double hf = Math.pow(RANDOM.nextDouble(), 0.7);
-            double a = front - RANDOM.nextDouble() * 1.5 + hf * 0.8;
-            // dark water face, aerated white over the top third, and white churn breaking through it
-            float white = RANDOM.nextFloat() < 0.35f ? 1f : smoothstep(0.15f, 0.5f, (float) hf);
-            WaveParticle.tint = shade(lerpColor(body, foam, white));
-            WaveParticle.sizeScale = (white < 0.5f ? 0.7f : 1f) * baseScale;
-            spawn(level, ModRegistries.WAVE_WATER.get(), f.x(a, l), surf + hf * crest - 0.6, f.z(a, l),
-                    ix * speed + jitter(0.05), 0.04 + RANDOM.nextDouble() * 0.06, iz * speed + jitter(0.05));
-        }
-        // Foam toe: low white water spilling ahead of the face.
-        int toe = count(budget * 0.18f);
-        for (int i = 0; i < toe; i++) {
-            double l = lateralSample(f, camLat);
-            double a = front + 0.5 + RANDOM.nextDouble() * 2.5;
-            WaveParticle.tint = shade(foam);
-            WaveParticle.sizeScale = baseScale;
-            spawn(level, ModRegistries.WAVE_WATER.get(), f.x(a, l), surf - 0.3 + RANDOM.nextDouble() * 0.6, f.z(a, l),
-                    ix * speed * 1.25, 0.01, iz * speed * 1.25);
-        }
-        // Dark turbulent water behind the face, streaked with white.
-        int behind = count(budget * 0.22f);
-        for (int i = 0; i < behind; i++) {
-            double l = lateralSample(f, camLat);
-            double back = RANDOM.nextDouble() * 7;
-            double a = front - 1 - back;
-            double h = crest * (0.75 - back / 14) * RANDOM.nextDouble();
-            WaveParticle.tint = shade(RANDOM.nextFloat() < 0.65f ? foam : lerpColor(body, foam, 0.35f));
-            spawn(level, ModRegistries.WAVE_WATER.get(), f.x(a, l), surf + Math.max(0, h) - 0.7, f.z(a, l),
-                    ix * speed * 0.9, 0.02, iz * speed * 0.9);
-        }
-        // Spray: fine haze over the crest, and droplets flung forward off the top.
-        int mist = count(budget * 0.05f);
-        for (int i = 0; i < mist; i++) {
-            double l = lateralSample(f, camLat);
-            double a = front - RANDOM.nextDouble() * 2;
-            spawn(level, ModRegistries.SEA_SPRAY.get(), f.x(a, l), surf + crest * (0.85 + RANDOM.nextDouble() * 0.3), f.z(a, l),
-                    ix * speed * 0.8 + jitter(0.03), 0.03 + RANDOM.nextDouble() * 0.05, iz * speed * 0.8 + jitter(0.03));
-        }
+        // The wave body and its white water are drawn as a water surface by WaveRenderer; particles only add the
+        // spray that real breaking water throws off: droplets flung from the crest and bursts against obstacles.
         WaveParticle.sizeScale = 1f;
         if (toFront < 90) {
-            int drops = count(budget * 0.06f);
+            int drops = count(budget * 0.08f);
             for (int i = 0; i < drops; i++) {
                 double l = lateralSample(f, camLat);
                 double a = front + RANDOM.nextDouble();
@@ -290,16 +277,8 @@ public final class TsunamiVisual implements DisasterVisual {
             double l = lateralSample(f, camLat);
             double a = RANDOM.nextDouble() * 2 - 1;
             double up = height * (0.5 + RANDOM.nextDouble()) * (0.6 + 0.4 * k);
-            WaveParticle.tint = shade(0xFFFFFF);
-            WaveParticle.sizeScale = 1.2f;
-            spawn(level, ModRegistries.WAVE_WATER.get(), f.x(a, l), surf + RANDOM.nextDouble() * 2, f.z(a, l),
-                    ix * 0.12 + jitter(0.05), up * 4, iz * 0.12 + jitter(0.05));
-            if (RANDOM.nextFloat() < 0.4f) {
-                WaveParticle.sizeScale = 1.5f;
-                spawn(level, ModRegistries.SEA_SPRAY.get(), f.x(a, l), surf + 3 + RANDOM.nextDouble() * (6 + 2 * d.intensity), f.z(a, l),
-                        ix * 0.08 + jitter(0.04), 0.05 + RANDOM.nextDouble() * 0.06, iz * 0.08 + jitter(0.04));
-            }
-            if (dist < 120 && RANDOM.nextFloat() < 0.5f) {
+            level.addParticle(ParticleTypes.SPLASH, f.x(a, l), surf + RANDOM.nextDouble(), f.z(a, l), ix * 0.3, up * 3, iz * 0.3);
+            if (dist < 160) {
                 WaveParticle.sizeScale = 1f;
                 spawn(level, ModRegistries.WAVE_FOAM.get(), f.x(a, l), surf + 1 + RANDOM.nextDouble() * 4, f.z(a, l),
                         ix * 0.25 + jitter(0.15), up * 5, iz * 0.25 + jitter(0.15));
@@ -327,6 +306,65 @@ public final class TsunamiVisual implements DisasterVisual {
         WaveParticle.sizeScale = 1f;
     }
 
+    /**
+     * Samples one wave front for {@link WaveRenderer}: per metre of coastline, the crest height (tapering into the water
+     * at both ends), the height of the water or ground behind and ahead of the wave, the water colour and the light.
+     */
+    private static WaveRenderer.Front sampleFront(ClientLevel level, Frame f, float prevAxial, float axial, float crest, float wall) {
+        WaveRenderer.Front w = new WaveRenderer.Front();
+        w.px = f.px();
+        w.pz = f.pz();
+        w.dx = f.dx();
+        w.dz = f.dz();
+        w.prevAxial = prevAxial;
+        w.axial = axial;
+        w.baseY = f.waterY() + WaveRenderer.WATER_TOP;
+        float hw = f.halfWidth();
+        int lines = (int) Math.ceil(hw * 2) + 1;
+        w.lines = lines;
+        w.lat0 = -hw;
+        w.height = new float[lines];
+        w.back = new float[lines];
+        w.ahead = new float[lines];
+        w.tint = new int[lines];
+        w.light = new int[lines];
+        w.foam = wall;
+        float h = crest * wall;
+        float backLen = 5f + h * 1.5f;
+        BlockPos.MutableBlockPos mp = new BlockPos.MutableBlockPos();
+        for (int i = 0; i < lines; i++) {
+            float l = Math.min(hw, -hw + i);
+            float taper = 1f - (float) Math.pow(Math.min(1f, Math.abs(l) / hw), 4);
+            w.height[i] = h * taper;
+            w.back[i] = surfaceHeight(level, f.x(axial - backLen, l), f.z(axial - backLen, l), w.baseY, mp);
+            w.ahead[i] = Math.min(w.height[i] + 1f, surfaceHeight(level, f.x(axial + 0.7, l), f.z(axial + 0.7, l), w.baseY, mp));
+            int bx = Mth.floor(f.x(axial, l)), bz = Mth.floor(f.z(axial, l));
+            BlockPos sea = new BlockPos(bx, (int) f.waterY(), bz);
+            // Sea-coloured at sea; it takes on the flood's sediment colour only as it runs up onto the land.
+            int water = net.minecraft.client.renderer.BiomeColors.getAverageWaterColor(level, sea) & 0xFFFFFF;
+            int mud = FloodTint.apply(sea.above(), water) & 0xFFFFFF;
+            w.tint[i] = lerpColor(water, mud, Mth.clamp(axial / 8f, 0f, 1f));
+            w.light[i] = net.minecraft.client.renderer.LevelRenderer.getLightCoords(level,
+                    mp.set(bx, Mth.floor(w.baseY + w.height[i] * 0.5f), bz));
+        }
+        return w;
+    }
+
+    /**
+     * Height of the water surface at a column above the sea surface (0 where there is no water: dry ground at the
+     * waterline). Only water counts - never a roof or a tree above it.
+     */
+    private static float surfaceHeight(ClientLevel level, double x, double z, float baseY, BlockPos.MutableBlockPos mp) {
+        int bx = Mth.floor(x), bz = Mth.floor(z);
+        int y0 = Mth.floor(baseY);
+        for (int y = y0 + 10; y >= y0; y--) {
+            if (!level.getFluidState(mp.set(bx, y, bz)).isEmpty()) {
+                return Mth.clamp(y + WaveRenderer.WATER_TOP - baseY, 0f, 10f);
+            }
+        }
+        return 0f;
+    }
+
     /** Where the bore slams into something solid (a wall, a house, a tree) it explodes upward in spray. */
     private void obstacleSpray(Frame f, ClientLevel level, double camLat, float front, float crest, double speed, int foam, float strength) {
         int probes = count(6 * strength);
@@ -343,16 +381,13 @@ public final class TsunamiVisual implements DisasterVisual {
             }
             if (!hit) continue;
             double ix = -f.dx(), iz = -f.dz();
-            for (int k = 0; k < 10; k++) {
+            for (int k = 0; k < 16; k++) {
                 spawn(level, ModRegistries.WAVE_FOAM.get(), bx + 0.5 - ix * 0.8, y0 + RANDOM.nextDouble() * crest * 0.6, bz + 0.5 - iz * 0.8,
                         jitter(0.25) - ix * 0.1, 0.35 + RANDOM.nextDouble() * 0.45, jitter(0.25) - iz * 0.1);
             }
-            for (int k = 0; k < 3; k++) {
-                WaveParticle.tint = foam;
-                spawn(level, ModRegistries.WAVE_WATER.get(), bx + 0.5 - ix, y0 + crest * (0.4 + RANDOM.nextDouble() * 0.6), bz + 0.5 - iz,
-                        jitter(0.08), 0.18 + RANDOM.nextDouble() * 0.2, jitter(0.08));
-                spawn(level, ModRegistries.SEA_SPRAY.get(), bx + 0.5, y0 + crest + RANDOM.nextDouble() * 2, bz + 0.5,
-                        ix * speed * 0.5 + jitter(0.04), 0.06, iz * speed * 0.5 + jitter(0.04));
+            for (int k = 0; k < 6; k++) {
+                level.addParticle(ParticleTypes.SPLASH, bx + 0.5 - ix, y0 + RANDOM.nextDouble() * crest * 0.5, bz + 0.5 - iz,
+                        jitter(0.2), 0.4 + RANDOM.nextDouble() * 0.3, jitter(0.2));
             }
         }
     }
@@ -368,12 +403,8 @@ public final class TsunamiVisual implements DisasterVisual {
         for (int i = 0; i < n; i++) {
             double l = lateralSample(f, camLat);
             double a = edge - RANDOM.nextDouble() * 1.5;
-            WaveParticle.tint = FOAM_SEA;
-            WaveParticle.sizeScale = 0.35f;
-            spawn(level, ModRegistries.WAVE_WATER.get(), f.x(a, l), f.waterY() + 0.85 - drop, f.z(a, l),
-                    f.dx() * 0.06, 0.0, f.dz() * 0.06);
-            WaveParticle.sizeScale = 1f;
-            if (RANDOM.nextFloat() < 0.4f) {
+            level.addParticle(ParticleTypes.SPLASH, f.x(a, l), f.waterY() + 0.9 - drop, f.z(a, l), f.dx() * 0.06, 0.05, f.dz() * 0.06);
+            if (RANDOM.nextFloat() < 0.6f) {
                 level.addParticle(ParticleTypes.BUBBLE_POP, f.x(a, l), f.waterY() + 1 - drop, f.z(a, l), 0, 0.02, 0);
             }
         }
@@ -402,14 +433,7 @@ public final class TsunamiVisual implements DisasterVisual {
             if (y <= f.waterY() + 1 && a > 0) continue;
             if (level.getFluidState(BlockPos.containing(x, y - 1, z)).isEmpty()) continue;
             double vx = f.dx() * flow + jitter(0.02), vz = f.dz() * flow + jitter(0.02);
-            if (RANDOM.nextFloat() < 0.25f) {
-                spawn(level, ModRegistries.FLOOD_DEBRIS.get(), x, y + 0.02, z, vx, 0, vz);
-            } else {
-                WaveParticle.tint = back && a < 3 ? FOAM_LAND : SILT;
-                WaveParticle.sizeScale = 0.35f;
-                spawn(level, ModRegistries.WAVE_WATER.get(), x, y - 0.12, z, vx, 0, vz);
-                WaveParticle.sizeScale = 1f;
-            }
+            if (RANDOM.nextFloat() < 0.3f) spawn(level, ModRegistries.FLOOD_DEBRIS.get(), x, y + 0.02, z, vx, 0, vz);
         }
     }
 
@@ -506,6 +530,7 @@ public final class TsunamiVisual implements DisasterVisual {
     @Override
     public void onRemoved(ClientDisaster d) {
         FloodTint.remove(d.id);
+        WaveRenderer.remove(d.id);
         if (d.visualState instanceof State st) {
             if (st.roar != null) st.roar.end();
             if (st.surf != null) st.surf.end();

@@ -300,14 +300,24 @@ public class TsunamiDisaster extends Disaster {
     /** Picks the direction with the most open water, then slides the landfall point onto the shoreline. */
     private void locateShore() {
         int cx = Mth.floor(pos.x), cz = Mth.floor(pos.z);
+        // Only water at or below the landfall's ground level is "the sea": not a hilltop lake or old flood water.
+        seaRefY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, cx, cz) - 1;
         double[] scores = new double[16];
         double bestScore = 0;
         for (int k = 0; k < 16; k++) {
             double a = k * Math.PI / 8;
+            // Length of the first continuous body of water along this ray (it must start within 30 blocks): open
+            // sea gives a long run; a pond, a river or a different body of water beyond a strip of land doesn't count.
+            boolean inWater = false;
             for (int r = 3; r <= 72; r += 3) {
                 int x = cx + (int) Math.round(Math.cos(a) * r), z = cz + (int) Math.round(Math.sin(a) * r);
                 if (!level.isLoaded(new BlockPos(x, 0, z))) break;
-                if (surfaceIsWater(x, z)) scores[k] += 1 + r / 72.0; // far water weighs more: open sea, not a puddle
+                if (surfaceIsWater(x, z)) {
+                    inWater = true;
+                    scores[k] += 1;
+                } else if (inWater || r > 30) {
+                    break;
+                }
             }
             bestScore = Math.max(bestScore, scores[k]);
         }
@@ -360,8 +370,11 @@ public class TsunamiDisaster extends Disaster {
         pos = new Vec3(shoreX + 0.5, waterY + 1, shoreZ + 0.5);
     }
 
+    private int seaRefY = Integer.MIN_VALUE;
+
     private boolean surfaceIsWater(int x, int z) {
         int top = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1;
+        if (seaRefY != Integer.MIN_VALUE && (top > seaRefY + 1 || top < seaRefY - 12)) return false;
         return level.getFluidState(new BlockPos(x, top, z)).is(FluidTags.WATER);
     }
 
@@ -386,13 +399,74 @@ public class TsunamiDisaster extends Disaster {
         if (!receding) startRecession();
         debris.finish();
         clearFloodTicks();
-        // Hand everything still outstanding to the shared queue (it outlives this disaster).
-        BlockChangeQueue queue = DisasterManager.blockQueue(level);
-        while (!pending.isEmpty()) {
-            BlockChangeQueue.Change c = pending.poll();
-            if (!queue.add(c)) c.apply(level);
+        // Whatever is still outstanding is finished by a cooperative task in the shared queue (it outlives this
+        // disaster): a few changes per tick, so other disasters' block changes are never starved behind it.
+        if (!pending.isEmpty()) {
+            ArrayDeque<BlockChangeQueue.Change> rest = new ArrayDeque<>(pending);
+            pending.clear();
+            new Cooperative(room -> {
+                int n = 0;
+                while (n < room && !rest.isEmpty()) {
+                    rest.poll().apply(level);
+                    n++;
+                }
+                return rest.isEmpty() ? -1 : n;
+            }, null).start();
         }
     }
+
+    /**
+     * Long-running cleanup that shares the block-change queue fairly: it occupies one slot, does at most
+     * {@link #CLEANUP_PER_TICK} units of work per tick, and goes back to the end of the queue until it is done.
+     */
+    private final class Cooperative implements BlockChangeQueue.Change {
+        /** Does up to {@code room} units of work; returns the work done, or -1 when everything is finished. */
+        interface Step { int run(int room); }
+
+        private final Step step;
+        private final Runnable then;
+        private long tick = Long.MIN_VALUE;
+        private int used;
+
+        Cooperative(Step step, Runnable then) {
+            this.step = step;
+            this.then = then;
+        }
+
+        void start() {
+            requeue();
+        }
+
+        private void requeue() {
+            if (DisasterManager.blockQueue(level).add(this)) return;
+            // Queue saturated (very rare): finish synchronously rather than lose the cleanup.
+            while (step.run(Integer.MAX_VALUE) >= 0) { }
+            if (then != null) then.run();
+        }
+
+        @Override
+        public void apply(ServerLevel l) {
+            long now = l.getGameTime();
+            if (now != tick) {
+                tick = now;
+                used = 0;
+            }
+            int room = CLEANUP_PER_TICK - used;
+            if (room <= 0) {
+                requeue();
+                return;
+            }
+            int done = step.run(room);
+            if (done < 0) {
+                if (then != null) then.run();
+                return;
+            }
+            used += done;
+            requeue();
+        }
+    }
+
+    private static final int CLEANUP_PER_TICK = 32;
 
     @Override
     protected void tickDisaster() {
@@ -669,10 +743,12 @@ public class TsunamiDisaster extends Disaster {
         if (!DisasterProtection.canModify(level, trunk, level.getBlockState(trunk))) return HELD;
         Vec3 flow = flowAt(x + 0.5, z + 0.5);
         level.playSound(null, trunk, ModRegistries.WOOD_SNAP.get(), net.minecraft.sounds.SoundSource.BLOCKS, 2.2f, 0.65f);
+        // Structural damage happens as the bore hits: it jumps ahead of queued water filling (which may lag).
+        List<BlockChangeQueue.Change> rip = new ArrayList<>(parts.size());
         for (int k = 0; k < parts.size(); k++) {
             BlockPos bp = parts.get(k);
             boolean floatOff = k == 0 || k == parts.size() / 3 || k == parts.size() - 1;
-            pending.add(l -> {
+            rip.add(l -> {
                 if (isFinished() || receding) return;
                 BlockState st = level.getBlockState(bp);
                 if (!(st.is(net.minecraft.tags.BlockTags.LOGS) || st.is(net.minecraft.tags.BlockTags.LEAVES))) return;
@@ -685,6 +761,7 @@ public class TsunamiDisaster extends Disaster {
                 }
             });
         }
+        for (int k = rip.size() - 1; k >= 0; k--) pending.addFirst(rip.get(k));
         int surface = floodSurface((float) axialOf(x + 0.5, z + 0.5), (float) lateralOf(x + 0.5, z + 0.5));
         if (surface >= base) {
             FloodCol fc = new FloodCol(x, z, base, surface, force);
@@ -736,21 +813,24 @@ public class TsunamiDisaster extends Disaster {
         pending.add(l -> sweepPass(dryCells.toLongArray(), 0));
     }
 
-    /** One pass over the formerly dry cells; repeats (up to 6 passes) until a pass finds no flood water. */
+    /**
+     * One pass over the formerly dry cells; repeats (up to 6 passes) until a pass finds no flood water. Runs as a
+     * {@link Cooperative} task: checking a cell is cheap, so it covers 8 cells per unit of work.
+     */
     private void sweepPass(long[] cells, int pass) {
         clearFloodTicks();
-        BlockChangeQueue queue = DisasterManager.blockQueue(level);
-        int[] found = {0};
-        for (int k = 0; k < cells.length; k += 48) {
-            int from = k, to = Math.min(cells.length, k + 48);
-            BlockChangeQueue.Change c = q -> found[0] += sweep(cells, from, to);
-            if (!queue.add(c)) c.apply(level);
-        }
-        BlockChangeQueue.Change after = q -> {
+        int[] next = {0}, found = {0};
+        new Cooperative(room -> {
+            if (next[0] >= cells.length) return -1;
+            int to = (int) Math.min(cells.length, next[0] + (long) room * 8);
+            found[0] += sweep(cells, next[0], to);
+            int work = Math.max(1, (to - next[0]) / 8);
+            next[0] = to;
+            return work;
+        }, () -> {
             if (found[0] > 0 && pass < 5) sweepPass(cells, pass + 1);
             else drainStrays();
-        };
-        if (!queue.add(after)) after.apply(level);
+        }).start();
     }
 
     /** Dries flood water (source or flowing) in cells that were dry before the flood. @return cells dried */

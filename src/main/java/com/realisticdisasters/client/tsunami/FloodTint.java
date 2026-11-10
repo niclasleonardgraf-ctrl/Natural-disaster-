@@ -14,7 +14,7 @@ import net.minecraft.util.Mth;
  * Read from chunk-meshing worker threads, written on the client thread, hence the concurrent map of immutable zones.
  */
 public final class FloodTint {
-    private static final int SHORE = 0x5C6A58; // turbid grey-green
+    private static final int SHORE = 0x5F6C4E; // turbid olive-green
     private static final int INLAND = 0x4B3D2C; // dark, sediment-laden brown
 
     record Zone(double px, double pz, double dx, double dz, float halfWidth, float reach, int waterY) {}
