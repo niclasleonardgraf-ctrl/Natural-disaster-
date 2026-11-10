@@ -256,8 +256,8 @@ public final class MeteorShowerVisual implements DisasterVisual {
                 double spacing = Math.max(0.2, width * 0.45);
                 int steps = Math.max(1, (int) Math.ceil(s.vel.length() / spacing));
                 for (int i = 0; i < steps; i++) {
-                    Vec3 at = s.pos.add(s.vel.scale(i / (double) steps));
-                    glow(at, Vec3.ZERO, width, 4 + RANDOM.nextInt(3), s.head, new float[]{1f, 0.72f, 0.48f}, 0.85f, 1f);
+                    Vec3 at = s.pos.add(s.vel.scale((i + RANDOM.nextDouble()) / steps));
+                    glow(at, Vec3.ZERO, width, 3 + RANDOM.nextInt(5), s.head, new float[]{1f, 0.72f, 0.48f}, 0.85f, 1f);
                     if (s.train && (i & 1) == 0) {
                         // Persistent train: a faint, continuous, slowly spreading ionised glow (often greenish).
                         glow(at, Vec3.ZERO, width * 2.5f, 40 + RANDOM.nextInt(40), new float[]{0.72f, 0.95f, 0.82f},
@@ -363,9 +363,11 @@ public final class MeteorShowerVisual implements DisasterVisual {
             }
             // Continuous incandescent wake: densely packed glows that cool from white to orange-red behind the head.
             int wake = Math.max(4, (int) Math.ceil(FLIGHT_SPEED / Math.max(0.2, core * 0.14)));
-            for (int i = 1; i <= wake; i++) {
-                Vec3 at = head.subtract(vel.scale(i / (double) wake));
-                glow(at, Vec3.ZERO, core * 0.9f, 7 + RANDOM.nextInt(5), new float[]{1f, 0.93f, 0.75f},
+            for (int i = 0; i < wake; i++) {
+                // Random points along this tick's path (not evenly spaced): evenly spaced batches that age
+                // together read as a string of pearls, one per tick of travel.
+                Vec3 at = head.subtract(vel.scale(RANDOM.nextDouble())).add(jitter(core * 0.06));
+                glow(at, Vec3.ZERO, core * (0.75f + RANDOM.nextFloat() * 0.3f), 5 + RANDOM.nextInt(9), new float[]{1f, 0.93f, 0.75f},
                         new float[]{0.85f, 0.3f, 0.1f}, 0.75f, 0.6f);
             }
             // Large coloured halo, inner halo, then the blinding white head on top.

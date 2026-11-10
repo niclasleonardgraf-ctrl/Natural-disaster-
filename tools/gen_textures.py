@@ -146,6 +146,9 @@ def smoke_texture(seed, size=32):
                 continue
             dens = dens * (0.6 + 0.4 * n1[y][x]) * (0.85 + 0.3 * n2[y][x])
             a = max(0.0, min(1.0, dens ** 1.6 * 1.4))
+            # Radial window: alpha reaches exactly 0 well inside the quad, so huge puffs never show straight edges.
+            rr = math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2) / (size / 2)
+            a *= max(0.0, min(1.0, (0.92 - rr) / 0.35))
             shade = int(255 * (0.82 + 0.18 * (1 - y / size)) * (0.9 + 0.1 * n2[y][x]))
             img.putpixel((x, y), (shade, shade, shade, int(a * 235)))
     return img
