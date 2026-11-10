@@ -17,6 +17,10 @@ PARTICLES = os.path.join(ROOT, "assets", "realisticdisasters", "textures", "part
 CLOUD = [(236, 236, 232), (206, 207, 201), (172, 174, 168), (138, 140, 134)]
 DUST = [(232, 228, 220), (206, 201, 192), (176, 170, 160), (144, 138, 128)]  # neutral: tinted in code
 DEBRIS = [(118, 86, 54), (92, 66, 40), (86, 120, 52), (64, 92, 38), (128, 128, 128), (98, 98, 98)]
+# Tsunami: deep sea body (vanilla-ish ocean blues), salt mist, white foam with a hint of aqua.
+SEA = [(86, 146, 178), (63, 118, 158), (47, 95, 136), (36, 74, 112)]
+MIST = [(244, 248, 250), (220, 232, 236), (192, 210, 216), (164, 186, 194)]
+FOAM = [(255, 255, 255), (226, 243, 246), (186, 222, 232)]
 
 
 def blob(size, rng, lobes, fill=1.0):
@@ -236,6 +240,35 @@ def rain_shaft(seed, size=64):
     return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
 
 
+def wave_texture(seed, size=16):
+    """Wave-body puff: sea-blue blob with a few white foam streaks on the upper edge."""
+    rng = random.Random(seed)
+    img = cloud_texture(seed, SEA, size=size, lobes=4)
+    for x in range(size):
+        for y in range(size):
+            if img.getpixel((x, y))[3] == 0:
+                continue
+            above_empty = y == 0 or img.getpixel((x, y - 1))[3] == 0
+            if above_empty and rng.random() < 0.7:
+                img.putpixel((x, y), FOAM[rng.randint(0, 1)] + (255,))
+            elif rng.random() < 0.05:
+                img.putpixel((x, y), FOAM[2] + (255,))
+    return img
+
+
+def foam_texture(seed, size=8):
+    """Spray droplet: a small cluster of white / pale aqua pixels."""
+    rng = random.Random(seed)
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    cx, cy = rng.randint(3, 4), rng.randint(3, 4)
+    for _ in range(rng.randint(5, 9)):
+        x = max(0, min(size - 1, cx + rng.randint(-2, 2)))
+        y = max(0, min(size - 1, cy + rng.randint(-2, 2)))
+        img.putpixel((x, y), FOAM[rng.randint(0, 2)] + (255,))
+    img.putpixel((cx, cy), FOAM[0] + (255,))
+    return img
+
+
 def write(img, name):
     os.makedirs(PARTICLES, exist_ok=True)
     img.save(os.path.join(PARTICLES, name + ".png"))
@@ -253,6 +286,9 @@ def main():
         write(soft_cloud(200 + i, density=0.85, wispy=True), f"dust_cloud_{i}")
         write(rain_shaft(400 + i), f"rain_shaft_{i}")
         write(debris_texture(300 + i), f"storm_debris_{i}")
+        write(wave_texture(400 + i), f"wave_water_{i}")
+        write(cloud_texture(500 + i, MIST, lobes=4, fill=0.9), f"sea_spray_{i}")
+        write(foam_texture(600 + i), f"wave_foam_{i}")
 
     # Realistic rain (overrides vanilla's blue rain texture; applies to all rain in the game).
     env = os.path.join(ROOT, "assets", "minecraft", "textures", "environment")

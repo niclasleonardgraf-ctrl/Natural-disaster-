@@ -10,6 +10,7 @@ Full design spec: [`docs/SPEC.md`](docs/SPEC.md).
 | Disaster | State |
 |---|---|
 | Tornado | ✅ complete |
+| Tsunami/flood | ✅ complete |
 | Earthquake, Wildfire, Volcano, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
 
 ## Commands (op level 2)
@@ -50,12 +51,31 @@ Implementation notes: oriented quads come from overriding `VortexParticle#extrac
 large particles by their real size (vanilla culls by centre point). All quad particles share vanilla's
 16384-particle queue, so the spawn budget keeps the storm around 11k particles.
 
+## Testing a tsunami in-game
+
+1. `./gradlew runClient`, create a world with cheats on and stand on a beach facing the sea (any coast works; the
+   tsunami snaps its landfall to the nearest shoreline within ~90 blocks and faces the open water by itself).
+2. `/disaster start tsunami 3` (or give a position on the beach: `/disaster start tsunami 3 ~ ~ ~`).
+3. Phases: **warning** (~30 s: the sea draws back and exposes the seabed near the beach, a foam line follows the
+   retreating water, low rumbles, the sky greys, animals run inland, villagers hide), **buildup** (~10 s: a wave wall
+   with a white breaking crest and spray rises out at sea and races in, refilling the drawn-back water),
+   **peak** (35-60 s: the wave runs up inland, shoves entities, tears out plants/leaves/weak blocks and floods low
+   ground, then the flood holds), **aftermath** (~25-40 s: the water drains top-down and the backwash pulls seaward).
+4. Afterwards the land is dry again, but the plants are gone, the turf near the shore is scoured to sand, gravel and
+   coarse dirt, and the dropped debris lies where the water left it. Pre-existing water (sea, ponds, rivers) is untouched.
+5. Started away from any coast it becomes an inland flash flood rolling in from a random direction.
+
 ## Automated tests
 
 `./gradlew runGameTestServer`. These run on a dedicated-server dist, so they also check that no client-only code loads on a server:
 - `tornado_damages_terrain`: a pig gets lifted and the turf is scoured
 - `tornado_respects_block_toggle`: with `blockDestruction=false` no blocks change
 - `tornado_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.23 ms)
+- `tsunami_floods_and_recedes` (own `tsunami_arena` with a walled sea, beach, plants and a pond): the sea draws back,
+  the land floods, then every flood block is gone, every original sea/pond block is still water, a pig was pushed/fled
+  inland, and the plant damage and erosion stay
+- `tsunami_respects_block_toggle`: with `blockDestruction=false` the tsunami changes no blocks
+- `tsunami_intensity3_tick_cost`: below 2 ms/tick while the wave floods (measured ~0.3-0.6 ms with ~8,600 water blocks)
 
 ## Configuration
 
@@ -63,6 +83,8 @@ large particles by their real size (vanilla culls by centre point). All quad par
   max active disasters, sync range, block destruction on/off, block changes per tick, spawn-protection radius,
   claim-mod respect, extra protected areas (`"dimension,x,z,radius"`), and per-disaster enable / weight / biomes.
   The tornado section also has max debris, duration scale, and whether it changes the weather.
+  The tsunami section has a duration scale (all phases) and a cap on flood water blocks per tsunami (default 12,000).
+  Natural tsunamis spawn in beach, stony shore, mangrove and (non-deep) ocean biomes.
 - `config/realisticdisasters-client.toml`: camera shake on/off and strength, FOV pulse, particle density, fog, sky tint.
   Also editable in-game: Mods → Realistic Natural Disasters → Config.
 
@@ -75,12 +97,14 @@ common (server-safe)
   disaster/DisasterProtection  config + spawn radius + protected areas + claim mods
   disaster/DisasterType      registry of kinds (factory, enable flag, weight, biomes)
   disaster/tornado/TornadoDisaster
+  disaster/tsunami/TsunamiDisaster   drawback, wave front, tracked flood water, recession, pushes, mob flight
   network/                   DisasterSyncPayload (every 4 ticks), DisasterRemovePayload
   command/DisasterCommand, config/, registry/ModRegistries (sounds, particles, damage type key)
 client (Dist.CLIENT only)
   ClientDisasters / ClientDisaster   interpolated mirror of server state, fade-out after removal
   EffectsManager             blends all disasters into sky/fog/cloud tint, fog distance, shake, FOV
-  DisasterVisual(s)          per-type particles + sounds (tornado/TornadoVisual)
+  DisasterVisual(s)          per-type particles + sounds (tornado/TornadoVisual, tsunami/TsunamiVisual)
+  tsunami/WaveParticle       wave body, crest foam and spray mist that travel with the wave front
   particle/VortexParticle    funnel / debris / dust particles that orbit their disaster
   sound/DisasterLoopSound    cross-fading positional (near) and non-attenuated (far) loops
 mixin/ClientLevelMixin       adds environment-attribute layers for sky, fog, cloud colour and sky light
@@ -103,6 +127,17 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
 - **Weather:** in the overworld a tornado starts rain (thunder at intensity ≥3) unless it's already thundering.
   Weather is global, so this affects the whole overworld.
 
+- **Tsunami water is static.** Flood water is placed and removed through the block-change queue with flags that skip
+  neighbour updates and `onPlace`, and while flood water exists the pending fluid ticks above sea level inside the
+  flood box are dropped every 2 ticks. So the flood never spreads beyond what was placed, and the recession can't be
+  refilled by the infinite-source rule (vanilla grass dying under the water would otherwise trigger that). Side
+  effect: pre-existing water/lava above sea level inside the flood box doesn't flow during the event.
+- **Tsunami bookkeeping:** every placed block is tracked and only those are removed; cells that were dry before the
+  flood (flooded cells and their side neighbours) are swept once more afterwards to catch any stray flow. Water that was
+  there before is never removed. The sea's drawback is tracked the same way and restored as the wave passes.
+- **Tsunami geometry:** the landfall snaps to the nearest shoreline and the wave comes from the direction with the most
+  open water (averaged over 16 directions). A landfall in open ocean with no shore in range only shows the wave.
+
 ## Known issues
 
 - Sound has not been heard-tested: the build container has no audio device. The sound files and their playback code
@@ -114,3 +149,9 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
 - Cloud sheets fade out before the render-distance fog, which would otherwise paint them bright. With very low render
   distances (< 8 chunks), the storm base therefore covers less of the sky.
 - The weather change is global (vanilla limitation).
+- Tsunami: if the server stops mid-tsunami (disasters aren't saved), the flood water or the sea's drawback at that
+  moment stays in the world. `/disaster stop` and `/disaster stop <id> now` both clean up properly.
+- Tsunami: replacing the lower half of a two-block plant with water can leave its upper half floating above the flood
+  line (block updates are suppressed to keep the water static).
+- Tsunami: the wave wall is drawn with particles (no moving block geometry), so very close up it reads as a dense
+  curtain of pixel-art spray rather than a solid surface.

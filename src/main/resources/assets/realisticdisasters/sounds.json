@@ -14,5 +14,21 @@
   "disaster.wind_gust": {
     "subtitle": "subtitles.realisticdisasters.wind_gust",
     "sounds": ["realisticdisasters:wind_gust1", "realisticdisasters:wind_gust2", "realisticdisasters:wind_gust3"]
+  },
+  "disaster.tsunami.roar": {
+    "subtitle": "subtitles.realisticdisasters.tsunami.roar",
+    "sounds": [{ "name": "realisticdisasters:tsunami_roar", "stream": true, "attenuation_distance": 96 }]
+  },
+  "disaster.tsunami.surf": {
+    "subtitle": "subtitles.realisticdisasters.tsunami.surf",
+    "sounds": [{ "name": "realisticdisasters:tsunami_surf", "stream": true }]
+  },
+  "disaster.tsunami.crash": {
+    "subtitle": "subtitles.realisticdisasters.tsunami.crash",
+    "sounds": [
+      { "name": "realisticdisasters:tsunami_crash1", "attenuation_distance": 64 },
+      { "name": "realisticdisasters:tsunami_crash2", "attenuation_distance": 64 },
+      { "name": "realisticdisasters:tsunami_crash3", "attenuation_distance": 64 }
+    ]
   }
 }

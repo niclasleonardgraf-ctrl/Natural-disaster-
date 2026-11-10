@@ -4,6 +4,7 @@ import java.util.EnumMap;
 import java.util.Map;
 
 import com.realisticdisasters.client.tornado.TornadoVisual;
+import com.realisticdisasters.client.tsunami.TsunamiVisual;
 import com.realisticdisasters.disaster.DisasterType;
 import net.minecraft.client.Camera;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -23,6 +24,7 @@ public final class DisasterVisuals {
 
     static {
         VISUALS.put(DisasterType.TORNADO, new TornadoVisual());
+        VISUALS.put(DisasterType.TSUNAMI, new TsunamiVisual());
     }
 
     public static DisasterVisual get(DisasterType type) {

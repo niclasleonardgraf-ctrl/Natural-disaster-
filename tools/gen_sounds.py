@@ -108,6 +108,49 @@ def gust(rng, seconds=3.0):
     return normalize(x * env, 0.7)
 
 
+def tsunami_roar(rng, seconds=8.0):
+    """Close layer: a breaking wall of water - deep churning rush, dense white-water hiss, irregular surges."""
+    n = int(seconds * RATE)
+    low = fast_lowpass(rng.standard_normal(n), 220) * 1.8
+    body = bandpass(rng.standard_normal(n), 300, 1400) * 0.55
+    hiss = bandpass(rng.standard_normal(n), 1800, 7000) * 0.22 * (0.5 + 0.5 * smooth_noise(n, 9, rng))
+    surge = 0.5 + 0.5 * smooth_noise(n, 1.4, rng)
+    x = (low + body + hiss) * surge
+    return normalize(loopable(x))
+
+
+def tsunami_surf(rng, seconds=12.0):
+    """Distant layer: heavy surf - slow swells that break into a hiss, over a low ocean rumble."""
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    rumble = fast_lowpass(rng.standard_normal(n), 160)
+    wash = bandpass(rng.standard_normal(n), 400, 3500)
+    # three swells per loop with slightly irregular shapes (period divides the loop so it stays seamless)
+    phase = (t / seconds * 3.0) % 1.0
+    swell = np.clip(np.sin(np.pi * phase) ** 3 * (0.75 + 0.25 * smooth_noise(n, 2, rng)), 0, 1)
+    x = rumble * (0.6 + 0.4 * swell) + wash * swell * 0.45
+    return normalize(loopable(x, 0.8), 0.85)
+
+
+def tsunami_crash(rng, seconds=3.5):
+    """One-shot: a wave slamming down - low thump, sharp broadband attack, long seething tail."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, seconds, n)
+    thump = fast_lowpass(rng.standard_normal(n), 90) * np.exp(-t * 4) * 2.0
+    crash = bandpass(rng.standard_normal(n), 200, 6000)
+    env = np.minimum(t / 0.04, 1) * np.exp(-t * 1.3) * (0.7 + 0.3 * smooth_noise(n, 12, rng))
+    seethe = bandpass(rng.standard_normal(n), 2500, 8000) * np.minimum(t / 0.3, 1) * np.exp(-t * 0.9) * 0.25
+    return normalize(thump + crash * env + seethe)
+
+
+def tsunami_main():
+    rng = np.random.default_rng(5678)
+    write_ogg("tsunami_roar", tsunami_roar(rng))
+    write_ogg("tsunami_surf", tsunami_surf(rng))
+    for i in range(1, 4):
+        write_ogg(f"tsunami_crash{i}", tsunami_crash(rng))
+
+
 def main():
     rng = np.random.default_rng(1234)
     write_ogg("tornado_roar", tornado_roar(rng))
@@ -115,6 +158,7 @@ def main():
     for i in range(1, 4):
         write_ogg(f"rumble{i}", rumble(rng))
         write_ogg(f"wind_gust{i}", gust(rng))
+    tsunami_main()
 
 
 if __name__ == "__main__":
