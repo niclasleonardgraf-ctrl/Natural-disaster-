@@ -29,10 +29,16 @@ public class BlizzardDisaster extends WindStormDisaster {
     @Override
     protected void tickExtra() {
         if (age() == 1 && DisasterConfig.BLIZZARD_CHANGES_WEATHER.getAsBoolean() && level.dimension() == Level.OVERWORLD
-                && !level.isRaining()) {
+                && !level.isRaining() && snowsHere()) {
             // Precipitation is snow in cold biomes, which is where blizzards spawn naturally.
             level.getServer().setWeatherParameters(0, 6000, true, false);
         }
+    }
+
+    /** Precipitation only helps where it falls as snow; rain inside a blizzard would look wrong. */
+    private boolean snowsHere() {
+        net.minecraft.core.BlockPos at = net.minecraft.core.BlockPos.containing(pos);
+        return level.isLoaded(at) && level.getBiome(at).value().coldEnoughToSnow(at, level.getSeaLevel());
     }
 
     @Override

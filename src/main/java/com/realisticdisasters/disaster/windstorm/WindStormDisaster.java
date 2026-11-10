@@ -26,6 +26,9 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Shared base for wide-area wind storms (blizzard, sandstorm). The storm is a big disc that drifts slowly with a
  * prevailing wind. Inside it: a gusting wind pushes exposed entities downwind, animals look for a roof, and the
@@ -240,25 +243,49 @@ public abstract class WindStormDisaster extends Disaster {
 
     // ------------------------------------------------------------------ accumulation
 
+    /**
+     * Queues accumulation work. Each unit is a small patch (centre column plus most of its neighbours), so the ground
+     * gets a continuous blanket instead of scattered single tiles. Most patches land around players standing in the
+     * storm, where the burial is actually watched; the rest spread over the whole disc.
+     */
     private void queueAccumulation(float s) {
         if (!DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean()) return;
-        float rate = accumulationRate();
-        int attempts = count((2f + intensity * 2.5f) * s * rate);
+        int patches = count((1f + intensity * 0.9f) * s * accumulationRate());
+        if (patches <= 0) return;
+        List<ServerPlayer> watchers = new ArrayList<>();
+        for (ServerPlayer p : level.players()) {
+            if (!p.isSpectator() && coverage(p.getX(), p.getZ()) > 0.2f) watchers.add(p);
+        }
         var queue = DisasterManager.blockQueue(level);
-        Vec3 w = wind();
-        for (int i = 0; i < attempts; i++) {
-            double a = random.nextDouble() * Math.PI * 2;
-            double rr = Math.sqrt(random.nextDouble()) * radius;
-            int x = Mth.floor(pos.x + Math.cos(a) * rr);
-            int z = Mth.floor(pos.z + Math.sin(a) * rr);
-            if (random.nextFloat() > coverage(x + 0.5, z + 0.5)) continue;
-            if (!level.isLoaded(new BlockPos(x, 0, z))) continue;
-            int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z);
-            BlockPos top = new BlockPos(x, y, z);
-            int drift = driftBonus(top, w);
+        for (int i = 0; i < patches; i++) {
+            double cx, cz;
+            if (!watchers.isEmpty() && random.nextFloat() < 0.6f) {
+                ServerPlayer p = watchers.get(random.nextInt(watchers.size()));
+                double a = random.nextDouble() * Math.PI * 2, rr = Math.sqrt(random.nextDouble()) * WATCHED_RADIUS;
+                cx = p.getX() + Math.cos(a) * rr;
+                cz = p.getZ() + Math.sin(a) * rr;
+            } else {
+                double a = random.nextDouble() * Math.PI * 2, rr = Math.sqrt(random.nextDouble()) * radius;
+                cx = pos.x + Math.cos(a) * rr;
+                cz = pos.z + Math.sin(a) * rr;
+            }
+            if (random.nextFloat() > coverage(cx, cz)) continue;
+            int x = Mth.floor(cx), z = Mth.floor(cz);
             if (!queue.add(l -> {
-                if (!isFinished()) accumulate(top, drift);
+                if (!isFinished()) accumulatePatch(x, z);
             })) return;
+        }
+    }
+
+    private static final int WATCHED_RADIUS = 40;
+
+    private void accumulatePatch(int x, int z) {
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if ((dx != 0 || dz != 0) && random.nextFloat() < 0.3f) continue;
+                if (!level.isLoaded(new BlockPos(x + dx, 0, z + dz))) continue;
+                accumulateColumn(x + dx, z + dz);
+            }
         }
     }
 
@@ -271,7 +298,18 @@ public abstract class WindStormDisaster extends Disaster {
     /** Admin / test hook: one accumulation step on a column right now (bypasses the queue, still protection-checked). */
     public void accumulateColumn(int x, int z) {
         BlockPos top = new BlockPos(x, level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z), z);
-        accumulate(top, driftBonus(top, wind()));
+        Vec3 w = wind();
+        int obstacle = driftBonus(top, w);
+        // Obstacles decide where the deep drifts go; on open ground the wind shapes long ridges across its path
+        // (sastrugi in snow, ripples and low dunes in sand).
+        accumulate(top, obstacle > 0 ? obstacle : undulation(x, z, w));
+    }
+
+    /** -1, 0 or +1: smooth ridges running across the wind, fixed per storm so they grow in place. */
+    private int undulation(int x, int z, Vec3 w) {
+        double along = x * w.x + z * w.z, across = -x * w.z + z * w.x;
+        double v = Math.sin(along * 0.19 + across * 0.035 + id * 1.7) * 0.75 + Math.sin(across * 0.06 - along * 0.05 + id) * 0.45;
+        return v > 0.55 ? 1 : v < -0.55 ? -1 : 0;
     }
 
     /** Override to speed up / slow down burial. */

@@ -45,6 +45,24 @@ Full design spec: [`docs/SPEC.md`](docs/SPEC.md).
    after a sandstorm, with deeper drifts and full-block sand piles against walls and in their lee.
 6. `/disaster stop` lets it die down. The new blocks `Sand Layer` / `Red Sand Layer` are in the Natural Blocks tab.
 
+### What the blizzard and sandstorm look like
+Modelled on real footage and meteorological descriptions of blizzards, ground blizzards and haboobs, then compared
+side by side with headless screenshots (`docs/screenshots/`) and tuned until they matched:
+- **Blizzard:** a flat, light-grey white-out. Sky and fog merge, so there is no horizon and no contrast. Nearby
+  objects ghost out within a few blocks, and visibility comes and goes with the gusts. Snow drives past almost
+  horizontally as motion-blurred streaks. Each flake is rolled to its on-screen direction of travel and stretched by
+  how fast it crosses the view, so snow coming straight at you reads as dots. Streamers of drifting snow race along
+  the ground and plume off roof edges and crests. From outside, an approaching blizzard is a grey-white curtain that
+  swallows the landscape.
+- **Sandstorm (haboob):** from outside, a towering front up to ~100 blocks high stretches to the horizon on both
+  sides. It is dark and dense at the base, with billowing "cauliflower" tops, and creeps forward while the dust boils
+  upward. It is visible from the warning phase on. Inside, everything turns a dark orange-brown monochrome
+  (rust-red over the badlands). Visibility drops to a few blocks and daylight dims toward dusk at high intensity.
+  Sand saltates in a shin-high layer along the ground.
+- **Accumulation** spreads as a continuous blanket where players are, rather than as scattered tiles. On open ground
+  it forms long ridges across the wind (sastrugi in snow, ripples and low dunes in sand); against walls it forms
+  deep drifts and piles.
+
 Shortcut for development: `./gradlew runClientVisualTest` loads the save `run/saves/VisualTest`, moves you onto a
 small pillar, plants a test forest and auto-starts an intensity-4 tornado at peak about 100 blocks away
 (`-Drealisticdisasters.autostart=type,intensity,PHASE`, dev only).
@@ -187,10 +205,13 @@ and `tools/gen_block_assets.py` (sand layer blockstates, models, loot tables).
   distances (< 8 chunks), the storm base therefore covers less of the sky.
 - The weather change is global (vanilla limitation).
 - Wind-storm sounds haven't been heard-tested either (no audio device), for the same reason.
-- Fine snowflakes are white on white fog, so they mostly read as motion close to the camera. The haze puffs carry
-  most of the white-out.
+- The haboob wall is built from billboard particles, so up close (within ~50 blocks) individual billows can show
+  their outlines, with slightly stepped edges where Minecraft's particle shader cuts off transparent pixels. From
+  further away it reads as one solid wall. A true volumetric dust wall would need a custom renderer.
+- The realism check compared headless screenshots against published descriptions of real blizzards and haboobs
+  (WMO cloud atlas, AMS glossary, NWS). I couldn't watch video footage from the build container.
 - Shelter-seeking is a short random search, not a real pathfinding query. In open terrain animals just drift downwind.
 - In the test world (plains) vanilla rain still falls inside a blizzard or sandstorm, because the weather is global.
   In the storms' own biomes it falls as snow (blizzard) or not at all (desert/badlands).
-- Screenshots of the headless visual check: `docs/screenshots/blizzard.png`, `docs/screenshots/sandstorm.png`.
+- Screenshots of the headless visual check: `docs/screenshots/blizzard.png`, `blizzard_approach.png`, `sandstorm.png`, `haboob_approach.png`.
 - The GameTest arena structure logs a harmless `oak_leaves[persistent=true]` parse error (existing, from `gen_structures.py`).

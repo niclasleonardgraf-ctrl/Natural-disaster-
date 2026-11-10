@@ -19,7 +19,9 @@ import net.minecraft.core.particles.SimpleParticleType;
 import net.minecraft.server.level.ParticleStatus;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.ARGB;
 import net.minecraft.util.Mth;
+import com.realisticdisasters.client.particle.WindParticle;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
@@ -35,7 +37,13 @@ public abstract class WindStormVisual implements DisasterVisual {
     protected static final RandomSource RANDOM = RandomSource.create();
 
     /** Colours and assets for one storm look. */
-    protected record Palette(int sky, int fog, int clouds, float darkness, float fogNear, float fogFar,
+    /**
+     * @param fog       fog colour at intensity 1; {@code fogDense} at intensity 5 (and in the strongest gusts)
+     * @param darkness  sky-light reduction at intensity 3 (scaled with intensity)
+     * @param wallBase  height in blocks of the storm front seen from outside, plus {@code wallPerLevel} per intensity
+     */
+    protected record Palette(int sky, int fog, int fogDense, int clouds, float darkness, float fogNear, float fogFar,
+                             float wallBase, float wallPerLevel,
                              Supplier<SimpleParticleType> fine, Supplier<SimpleParticleType> haze,
                              Supplier<SoundEvent> howl, Supplier<SoundEvent> distant) {}
 
@@ -88,17 +96,24 @@ public abstract class WindStormVisual implements DisasterVisual {
         double dist = horizontalDistance(d, cam);
         float s = d.strength();
         float in = inside(d, dist);
-        // The sky shifts from far away (warning sign), the fog only rolls in near / inside the storm.
+        float g = gust(d);
+        // Denser air in gusts and at higher intensity: the colour deepens as visibility drops.
+        float dense = Mth.clamp((d.intensity - 1) / 4f * 0.8f + (g - 1f) * 0.6f, 0f, 1f);
+        int fogColor = ARGB.srgbLerp(dense, 0xFF000000 | p.fog, 0xFF000000 | p.fogDense) & 0xFFFFFF;
+        // The sky shifts from far away (warning sign). Inside, sky and fog become one colour: no horizon, flat light.
         float reach = 1f - smoothstep(radius(d), radius(d) + 260f, (float) dist);
-        float skyW = s * Math.max(in, reach * 0.7f);
-        out.sky(p.sky, skyW);
-        out.clouds(p.clouds, skyW);
-        out.fogColor(p.fog, s * Math.max(in, reach * 0.5f));
-        out.darken(s * Math.max(in, reach * 0.3f) * p.darkness);
+        out.sky(fogColor, s * in);
+        out.sky(p.sky, s * reach * 0.7f * (1f - in));
+        out.clouds(p.clouds, s * Math.max(in, reach * 0.7f));
+        out.fogColor(fogColor, s * Math.max(in, reach * 0.5f));
+        float dark = p.darkness * (0.5f + 0.25f * (d.intensity - 1)) * (0.85f + 0.3f * Mth.clamp(g - 0.7f, 0f, 1f));
+        out.darken(s * Math.max(in, reach * 0.3f) * dark);
 
         boolean sheltered = sheltered(Minecraft.getInstance().level, cam);
-        // Fog end: thick inside (fogNear .. a few blocks at intensity 5), a wall on the horizon from outside.
+        // Fog end: thick inside (fogNear at intensity 1 .. fogFar at 5), pulsing with the gusts the way visibility
+        // comes and goes in real footage; a wall on the horizon from outside.
         float thick = p.fogNear - (p.fogNear - p.fogFar) * (d.intensity - 1) / 4f;
+        thick *= Mth.clamp(1.35f - 0.45f * g, 0.6f, 1.3f);
         float fogEnd = Mth.lerp(in, 140f + (float) Math.max(0, dist - radius(d)) * 0.5f, thick);
         if (sheltered) fogEnd *= 2.2f;
         float amount = s * Math.max(in, reach * 0.45f) * (sheltered ? 0.6f : 0.97f);
@@ -106,7 +121,6 @@ public abstract class WindStormVisual implements DisasterVisual {
         out.fog(fogEnd, amount);
 
         if (!sheltered) {
-            float g = gust(d);
             float buffet = s * in * (0.03f + 0.02f * d.intensity) * Mth.clamp((g - 0.7f) * 1.6f, 0.2f, 1f);
             out.shake(buffet);
             out.fovPulse(s * in * 0.25f * Mth.clamp(g - 0.8f, 0f, 1f));
@@ -141,7 +155,6 @@ public abstract class WindStormVisual implements DisasterVisual {
         float density = density();
         if (density <= 0) return;
         float s = d.strength();
-        if (s < 0.03f) return;
         double dist = horizontalDistance(d, cam);
         float in = inside(d, dist);
         Frustum frustum = camera.getCullFrustum();
@@ -154,30 +167,65 @@ public abstract class WindStormVisual implements DisasterVisual {
             wx /= wl;
             wz /= wl;
         }
-        float variant = d.data(WindStormDisaster.D_VARIANT);
+        int red = d.data(WindStormDisaster.D_VARIANT) > 0.5f ? WindParticle.RED : 0;
         float speed = Math.max(0.1f, d.data(WindStormDisaster.D_WIND_SPEED));
+        float g = gust(d);
         int id = d.id;
 
-        if (in > 0.01f) {
-            // Fine flakes / grains around the camera. Spawned upwind so they stream across the view.
-            float budget = (16 + d.intensity * 10) * density * s * in;
+        if (in > 0.01f && s > 0.03f) {
+            // Airborne flakes / grains close to the camera (further out the fog swallows them anyway).
+            // Spawned upwind so they stream across the view; more in the gusts.
+            float budget = (14 + d.intensity * 9) * density * s * in * (0.6f + 0.4f * g);
             int n = count(budget);
             for (int i = 0; i < n; i++) {
                 double a = RANDOM.nextDouble() * Math.PI * 2;
-                // Close to the camera: further out the thick fog swallows them anyway.
-                double r = 1.5 + Math.sqrt(RANDOM.nextDouble()) * 13;
+                double r = 2.5 + Math.sqrt(RANDOM.nextDouble()) * 10;
                 double x = cam.x + Math.cos(a) * r - wx * 7;
                 double z = cam.z + Math.sin(a) * r - wz * 7;
-                boolean ground = RANDOM.nextFloat() < 0.3f;
                 int surface = level.getHeight(Heightmap.Types.MOTION_BLOCKING, Mth.floor(x), Mth.floor(z));
-                double y = ground ? surface + 0.1 + RANDOM.nextDouble() * 0.6 : cam.y - 3 + RANDOM.nextDouble() * 8;
+                double y = cam.y - 3 + RANDOM.nextDouble() * 8;
                 if (y < surface) continue;             // under a roof or inside terrain: no snow indoors
-                if (y > cam.y + 30) continue;
                 if (!visible(frustum, x, y, z, wx * speed * 40, wz * speed * 40)) continue;
-                level.addParticle(p.fine.get(), true, false, x, y, z, id, ground ? 0.8 : 1.0, variant);
+                level.addParticle(p.fine.get(), true, false, x, y, z, id, 1.0, red);
             }
-            // Haze puffs: build up the white-out / brown-out at mid distance.
-            float hazeBudget = (1.2f + d.intensity * 0.7f) * density * s * in;
+
+            // Ground drift: ribbons of snow / sand streaming along the surface ("snow snakes", saltation).
+            // Each ribbon is a short line of particles along the wind, so they read as flowing streamers.
+            float ribbons = (2.5f + d.intensity * 1.5f) * density * s * in * g;
+            int rn = count(ribbons);
+            for (int i = 0; i < rn; i++) {
+                double a = RANDOM.nextDouble() * Math.PI * 2;
+                double r = 2 + Math.sqrt(RANDOM.nextDouble()) * 16;
+                double x0 = cam.x + Math.cos(a) * r - wx * 8, z0 = cam.z + Math.sin(a) * r - wz * 8;
+                int len = 3 + RANDOM.nextInt(5);
+                for (int k = 0; k < len; k++) {
+                    double x = x0 + wx * k * 0.7 + (RANDOM.nextDouble() - 0.5) * 0.3;
+                    double z = z0 + wz * k * 0.7 + (RANDOM.nextDouble() - 0.5) * 0.3;
+                    int surface = level.getHeight(Heightmap.Types.MOTION_BLOCKING, Mth.floor(x), Mth.floor(z));
+                    if (surface > cam.y + 6 || surface < cam.y - 10) continue;
+                    double y = surface + 0.05 + RANDOM.nextDouble() * 0.3;
+                    if (!visible(frustum, x, y, z, wx * speed * 30, wz * speed * 30)) continue;
+                    level.addParticle(p.fine.get(), true, false, x, y, z, id, 0.85, red | WindParticle.DRIFT);
+                }
+            }
+
+            // Plumes: snow / sand streaming off roof edges, walls and crests (a column higher than the one upwind).
+            int probes = count(6 * density * s * in);
+            for (int i = 0; i < probes; i++) {
+                double a = RANDOM.nextDouble() * Math.PI * 2;
+                double r = 3 + RANDOM.nextDouble() * 20;
+                int x = Mth.floor(cam.x + Math.cos(a) * r), z = Mth.floor(cam.z + Math.sin(a) * r);
+                int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z);
+                int upwind = level.getHeight(Heightmap.Types.MOTION_BLOCKING, Mth.floor(x - wx * 1.5), Mth.floor(z - wz * 1.5));
+                if (top <= upwind || !visible(frustum, x + 0.5, top, z + 0.5, wx * 6, wz * 6)) continue;
+                for (int k = 0; k < 4; k++) {
+                    level.addParticle(p.fine.get(), true, false, x + RANDOM.nextDouble(), top + 0.1 + RANDOM.nextDouble() * 0.4,
+                            z + RANDOM.nextDouble(), id, 0.9, red | WindParticle.DRIFT);
+                }
+            }
+
+            // Haze: builds the white-out / brown-out; gusts drive denser sheets through.
+            float hazeBudget = (1.0f + d.intensity * 0.6f) * density * s * in * (0.4f + 0.6f * g * g);
             int h = count(hazeBudget);
             for (int i = 0; i < h; i++) {
                 double a = RANDOM.nextDouble() * Math.PI * 2;
@@ -185,29 +233,43 @@ public abstract class WindStormVisual implements DisasterVisual {
                 double x = cam.x + Math.cos(a) * r - wx * 16;
                 double z = cam.z + Math.sin(a) * r - wz * 16;
                 int surface = level.getHeight(Heightmap.Types.MOTION_BLOCKING, Mth.floor(x), Mth.floor(z));
-                double y = Math.max(surface + 0.5, cam.y - 3) + RANDOM.nextDouble() * 9;
+                // Densest near the ground, thinning upward.
+                double y = Math.max(surface + 0.5, cam.y - 3) + Math.pow(RANDOM.nextDouble(), 1.6) * 10;
                 if (!visible(frustum, x, y, z, wx * speed * 50, wz * speed * 50)) continue;
-                level.addParticle(p.haze.get(), true, false, x, y, z, id, 1.0, variant);
+                level.addParticle(p.haze.get(), true, false, x, y, z, id, 1.0, red);
             }
         }
-        if (in < 0.9f && dist < radius(d) + 220) {
-            // Seen from outside: a rolling wall of haze along the storm's near edge. Distance LOD: fewer, bigger puffs.
-            float lod = dist < radius(d) + 80 ? 1f : 0.45f;
-            int n = count((1.5f + d.intensity * 0.6f) * density * s * lod * (1f - in));
+
+        // Seen from outside: the storm front, a towering wall (a haboob for the sandstorm, a grey-white snow curtain
+        // for the blizzard). Visible from the warning phase on, as it approaches. Distance LOD: fewer, bigger puffs.
+        float front = d.phase == Phase.WARNING ? 0.25f + 0.75f * d.phaseProgress : s;
+        if (in < 0.9f && front > 0.03f && dist < radius(d) + 300) {
+            // A real front is a straight wall running off to the horizon on both sides, not a ring around you:
+            // lay it along the tangent of the storm disc at the point nearest the viewer.
+            float lod = dist < radius(d) + 90 ? 1f : 0.5f;
+            float wallH = p.wallBase + p.wallPerLevel * d.intensity;
+            int n = count((5f + d.intensity * 2.5f) * density * front * lod * (1f - in));
             Vec3 c = d.pos();
             double ex = cam.x - c.x, ez = cam.z - c.z;
             double el = Math.max(1e-3, Math.sqrt(ex * ex + ez * ez));
             ex /= el;
             ez /= el;
+            double edge = radius(d) * 0.95;
+            double halfLength = radius(d) + 80;
             for (int i = 0; i < n; i++) {
-                double along = (RANDOM.nextDouble() - 0.5) * 120;
-                double r = radius(d) * (0.85 + RANDOM.nextDouble() * 0.2);
-                double x = c.x + ex * r - ez * along;
-                double z = c.z + ez * r + ex * along;
+                double along = (RANDOM.nextDouble() * 2 - 1) * halfLength;
+                double depth = (RANDOM.nextDouble() - 0.5) * 12;   // some thickness to the front
+                double x = c.x + ex * (edge + depth) - ez * along;
+                double z = c.z + ez * (edge + depth) + ex * along;
                 int surface = level.getHeight(Heightmap.Types.MOTION_BLOCKING, Mth.floor(x), Mth.floor(z));
-                double y = surface + RANDOM.nextDouble() * (10 + d.intensity * 5);
+                float frac = RANDOM.nextFloat();
+                // Billowing top: the front's height undulates along its length.
+                double top = wallH * (0.8 + 0.2 * Math.sin(along * 0.045 + d.id) + 0.08 * Math.sin(along * 0.17 + d.id * 3));
+                double y = surface + frac * top;
                 if (!visible(frustum, x, y, z, 0, 0)) continue;
-                level.addParticle(p.haze.get(), true, true, x, y, z, id, 2.2 + RANDOM.nextDouble() * (1 - lod) * 3, variant);
+                // Dense, smaller puffs at the base; bigger billows ("cauliflower" tops) higher up.
+                double size = (3 + 5 * frac) * (lod < 1 ? 1.6 : 1.0) * (0.8 + wallH / 200.0);
+                level.addParticle(p.haze.get(), true, true, x, y, z, id, size, (red | WindParticle.WALL) + Math.min(0.99f, frac));
             }
         }
     }

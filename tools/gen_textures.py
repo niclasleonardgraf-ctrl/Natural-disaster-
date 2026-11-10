@@ -244,12 +244,35 @@ def soft_flake(seed, size=16, stretch=1.0, grain=False):
     y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
     x = x + rng.uniform(-0.08, 0.08)
     y = y + rng.uniform(-0.08, 0.08)
-    r = np.sqrt((x / stretch) ** 2 + y * y)
+    r = np.sqrt((x / stretch) ** 2 + (y * (1 + (stretch - 1) * 0.5)) ** 2)  # longer streaks are also thinner
     core = 0.35 if grain else 0.5
     a = np.exp(-(r / core) ** 2 * 2.2)
     n = fbm(size, rng, octaves=3, base=2)
     a = np.clip(a * (0.75 + 0.5 * n), 0, 1)
     light = np.clip(0.88 + 0.12 * (1 - r) + (0.1 * (n - 0.5) if grain else 0), 0, 1)
+    rgb = (light * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
+
+
+def haze_puff(seed, size=128):
+    """Dense dust / snow puff with a lumpy, billowy ("cauliflower") outline. The middle is solid so overlapping puffs
+    merge into one continuous mass; the outline is irregular because the particle shader cuts off near-transparent
+    pixels, and a perfectly round cut would show as an obvious circle."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    lumps = fbm(size, rng, octaves=5, base=3)
+    soft = fbm(size, rng, octaves=3, base=2)
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    r0 = np.sqrt(x * x + y * y)
+    r = r0 * (0.78 + 0.5 * (lumps - 0.5) * 1.6)
+    t = np.clip((1 - r) / 0.3, 0, 1)  # narrow edge band: crisp billows, no sky-tinted halo
+    a = np.clip(t * t * (3 - 2 * t) * (1.15 + 0.3 * (soft - 0.5)), 0, 1)
+    # Hard guarantee that nothing reaches the square's border (it would show as a straight edge on screen).
+    window = np.clip((0.96 - r0) / 0.3, 0, 1)
+    a = a * window * window * (3 - 2 * window)
+    # Only a faint per-puff highlight: the wall's overall lighting (dark base, lit top) is applied per particle,
+    # otherwise every puff gets its own bright rim and the mass looks like fish scales.
+    light = np.clip(0.86 + 0.06 * (-y * 0.5 + 0.5) + 0.1 * (lumps - 0.5), 0, 1)
     rgb = (light * 255).astype("uint8")
     return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
 
@@ -273,9 +296,9 @@ def main():
         write(debris_texture(300 + i), f"storm_debris_{i}")
         # Wind storms (blizzard / sandstorm): near-white, tinted in code.
         write(soft_flake(600 + i, stretch=1.0 + i * 0.9), f"blizzard_snow_{i}")
-        write(soft_cloud(700 + i, density=0.75, wispy=True), f"snow_haze_{i}")
+        write(haze_puff(700 + i), f"snow_haze_{i}")
         write(soft_flake(800 + i, size=8, stretch=1.0 + i * 0.7, grain=True), f"sand_grain_{i}")
-        write(soft_cloud(900 + i, density=0.8, wispy=True), f"sand_haze_{i}")
+        write(haze_puff(900 + i), f"sand_haze_{i}")
 
     # Realistic rain (overrides vanilla's blue rain texture; applies to all rain in the game).
     env = os.path.join(ROOT, "assets", "minecraft", "textures", "environment")
