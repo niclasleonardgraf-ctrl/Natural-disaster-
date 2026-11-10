@@ -41,9 +41,9 @@ public class AshParticle extends SingleQuadParticle {
                 friction = 0.985f;
                 baseSize = 4.0f + r.nextFloat() * 5.5f;
                 // desaturated, slightly warm grey-brown ash
-                float shade = 0.36f + r.nextFloat() * 0.22f;
+                float shade = 0.2f + r.nextFloat() * 0.16f;
                 setColor(shade, shade * 0.95f, shade * 0.9f);
-                baseAlpha = 0.85f + r.nextFloat() * 0.15f;
+                baseAlpha = 0.92f + r.nextFloat() * 0.08f;
                 minBlockLight = 5;
             }
             case TRAIL -> {

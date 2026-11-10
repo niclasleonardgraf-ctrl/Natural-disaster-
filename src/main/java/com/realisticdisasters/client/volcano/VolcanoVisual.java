@@ -162,18 +162,18 @@ public final class VolcanoVisual implements DisasterVisual {
         }
 
         // Eruption column: puffs along the leaning stem.
-        int stem = count(budget * col);
+        int stem = count(budget * 1.8f * col);
         for (int i = 0; i < stem; i++) {
             float hf = (float) Math.pow(RANDOM.nextFloat(), 0.8);
             double lean = Math.pow(hf, 1.6) * height * 0.35;
-            double r = (1.5 + hf * height * 0.1) * RANDOM.nextFloat();
+            double r = (2.5 + hf * height * 0.12) * Math.sqrt(RANDOM.nextFloat());
             double a = RANDOM.nextDouble() * Math.PI * 2;
             level.addParticle(ModRegistries.ASH_CLOUD.get(), true, true,
                     vent.x + wind.x * lean + Math.cos(a) * r, vent.y + 1 + hf * height, vent.z + wind.z * lean + Math.sin(a) * r,
                     wind.x * 0.04 * hf, 0.08 + RANDOM.nextDouble() * 0.12 * (1 - hf), wind.z * 0.04 * hf);
         }
         // Umbrella cloud spreading out at the top of the column.
-        int cap = count(budget * 0.8f * col);
+        int cap = count(budget * 1.2f * col);
         for (int i = 0; i < cap; i++) {
             double a = RANDOM.nextDouble() * Math.PI * 2;
             double r = Math.sqrt(RANDOM.nextDouble()) * height * 0.45;

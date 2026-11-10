@@ -66,7 +66,7 @@ Dev shortcut: set `realisticdisasters.autostart` in the `clientVisualTest` run t
 - `volcano_erupts`: a cone is built on the flat arena, bombs fly, a blast happens and lava flows
 - `volcano_lava_cools`: placed lava turns into basalt/blackstone
 - `volcano_respects_block_toggle`: with `blockDestruction=false` it still erupts but no blocks change
-- `volcano_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.33 ms)
+- `volcano_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured 0.2–0.4 ms)
 
 ## Configuration
 
