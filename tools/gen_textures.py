@@ -76,6 +76,60 @@ def debris_texture(seed, size=8):
     return img
 
 
+# Meteor palettes: hot white core -> yellow -> orange -> red rim. Streak/ember sprites stay pale because the
+# particle code tints them as they cool.
+FIRE = [(255, 255, 240), (255, 236, 140), (255, 168, 52), (214, 84, 26)]
+GLOW = [(255, 255, 255), (240, 240, 228), (210, 210, 196)]
+
+
+def fireball_texture(seed, size=16):
+    """Round, slightly ragged glowing blob with hard colour bands."""
+    rng = random.Random(seed)
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    c = size / 2
+    for y in range(size):
+        for x in range(size):
+            d = math.hypot(x + 0.5 - c, y + 0.5 - c) / (size * 0.47) + rng.uniform(-0.08, 0.08)
+            if d > 1.0:
+                continue
+            idx = 0 if d < 0.3 else 1 if d < 0.55 else 2 if d < 0.8 else 3
+            img.putpixel((x, y), FIRE[idx] + (255,))
+    return img
+
+
+def streak_texture(seed, size=8):
+    """Small star-like glow: bright centre, paler arms."""
+    rng = random.Random(seed)
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    arm = 2 + seed % 2
+    for i in range(-arm, arm):
+        img.putpixel((4 + i, 3), GLOW[2] + (255,))
+        img.putpixel((4 + i, 4), GLOW[2] + (255,))
+        img.putpixel((3, 4 + i), GLOW[2] + (255,))
+        img.putpixel((4, 4 + i), GLOW[2] + (255,))
+    for x in range(2, 6):
+        for y in range(2, 6):
+            if rng.random() < 0.85:
+                img.putpixel((x, y), GLOW[1] + (255,))
+    for x in (3, 4):
+        for y in (3, 4):
+            img.putpixel((x, y), GLOW[0] + (255,))
+    return img
+
+
+def ember_texture(seed, size=8):
+    rng = random.Random(seed)
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    w = 2 + seed % 2
+    ox = 3 - w // 2
+    for x in range(w):
+        for y in range(w):
+            img.putpixel((ox + x, ox + y), GLOW[0 if (x + y) % 2 == 0 else 1] + (255,))
+    if rng.random() < 0.6:
+        img.putpixel((ox + w, ox + rng.randint(0, w - 1)), GLOW[2] + (255,))
+    return img
+
+
 def write(img, name):
     os.makedirs(PARTICLES, exist_ok=True)
     img.save(os.path.join(PARTICLES, name + ".png"))
@@ -104,6 +158,11 @@ def main():
     for x in range(16):
         icon.putpixel((x, 15), (92, 66, 40, 255))
     icon.resize((128, 128), Image.NEAREST).save(os.path.join(ROOT, "realisticdisasters_logo.png"))
+
+    for i in range(4):
+        write(fireball_texture(400 + i), f"meteor_fireball_{i}")
+        write(streak_texture(500 + i), f"meteor_streak_{i}")
+        write(ember_texture(600 + i), f"meteor_ember_{i}")
 
 
 if __name__ == "__main__":

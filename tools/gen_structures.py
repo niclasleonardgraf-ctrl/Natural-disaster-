@@ -88,5 +88,22 @@ def arena():
     write_structure("tornado_arena", (sx, sy, sz), blocks)
 
 
+def meteor_arena():
+    """Deeper than the tornado arena so a crater (and its core) fits inside the structure."""
+    sx, sy, sz = 32, 18, 32
+    blocks = {}
+    for x in range(sx):
+        for z in range(sz):
+            for y in range(0, 9):
+                blocks[(x, y, z)] = "minecraft:stone"
+            blocks[(x, 9, z)] = "minecraft:dirt"
+            blocks[(x, 10, z)] = "minecraft:dirt"
+            blocks[(x, 11, z)] = "minecraft:grass_block"
+            for y in range(12, sy):
+                blocks[(x, y, z)] = "minecraft:air"
+    write_structure("meteor_arena", (sx, sy, sz), blocks)
+
+
 if __name__ == "__main__":
     arena()
+    meteor_arena()

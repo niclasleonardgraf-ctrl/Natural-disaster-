@@ -2,6 +2,9 @@
   "disaster.realisticdisasters.tornado": "Tornado",
   "disaster.realisticdisasters.tornado.warning": "The sky turns a sickly green... a storm is organising nearby.",
   "disaster.realisticdisasters.tornado.touchdown": "A funnel is reaching for the ground! Take shelter!",
+  "disaster.realisticdisasters.meteor_shower": "Meteor Shower",
+  "disaster.realisticdisasters.meteor_shower.warning": "Shooting stars are streaking across the sky... more than usual.",
+  "disaster.realisticdisasters.meteor_shower.impacts": "Fireballs are reaching the ground! Take cover!",
 
   "phase.realisticdisasters.warning": "Warning",
   "phase.realisticdisasters.buildup": "Buildup",
@@ -19,11 +22,17 @@
 
   "death.attack.realisticdisasters.tornado": "%1$s was swept away by a tornado",
   "death.attack.realisticdisasters.tornado.player": "%1$s was swept away by a tornado while fighting %2$s",
+  "death.attack.realisticdisasters.meteor": "%1$s was struck by a meteor",
+  "death.attack.realisticdisasters.meteor.player": "%1$s was struck by a meteor while fighting %2$s",
 
   "subtitles.realisticdisasters.tornado.roar": "Tornado roars",
   "subtitles.realisticdisasters.tornado.distant": "Distant rumbling wind",
   "subtitles.realisticdisasters.rumble": "Distant rumble",
   "subtitles.realisticdisasters.wind_gust": "Wind gusts",
+  "subtitles.realisticdisasters.meteor.whoosh": "Meteor roars past",
+  "subtitles.realisticdisasters.meteor.whoosh_distant": "Distant meteor whooshes",
+  "subtitles.realisticdisasters.meteor.impact": "Meteor impacts",
+  "subtitles.realisticdisasters.meteor.impact_distant": "Distant meteor impact",
 
   "realisticdisasters.configuration.title": "Realistic Natural Disasters",
   "realisticdisasters.configuration.section.realisticdisasters.common.toml": "Disasters (server)",
@@ -33,6 +42,7 @@
   "realisticdisasters.configuration.general": "General",
   "realisticdisasters.configuration.destruction": "Destruction & protection",
   "realisticdisasters.configuration.tornado": "Tornado",
+  "realisticdisasters.configuration.meteor_shower": "Meteor shower",
   "realisticdisasters.configuration.camera": "Camera",
   "realisticdisasters.configuration.visuals": "Visuals"
 }

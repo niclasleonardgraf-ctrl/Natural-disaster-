@@ -33,6 +33,17 @@ public final class DisasterConfig {
     public static final ModConfigSpec.BooleanValue TORNADO_CHANGES_WEATHER;
     public static final ModConfigSpec.ConfigValue<List<? extends String>> TORNADO_BIOMES;
 
+    // ---- meteor shower ----
+    public static final ModConfigSpec.BooleanValue METEOR_ENABLED;
+    public static final ModConfigSpec.IntValue METEOR_WEIGHT;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> METEOR_BIOMES;
+    public static final ModConfigSpec.DoubleValue METEOR_DURATION_SCALE;
+    public static final ModConfigSpec.DoubleValue METEOR_IMPACT_RATE;
+    public static final ModConfigSpec.DoubleValue METEOR_CRATER_SCALE;
+    public static final ModConfigSpec.DoubleValue METEOR_ORE_CHANCE;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> METEOR_ORES;
+    public static final ModConfigSpec.BooleanValue METEOR_STARTS_FIRES;
+
     static {
         B.push("general");
         NATURAL_SPAWNING = B.comment("Whether disasters start naturally near players.")
@@ -78,6 +89,28 @@ public final class DisasterConfig {
                         "minecraft:meadow", "minecraft:forest", "minecraft:birch_forest", "minecraft:flower_forest",
                         "minecraft:swamp", "minecraft:badlands", "minecraft:wooded_badlands"),
                         () -> "minecraft:plains", o -> o instanceof String);
+        B.pop();
+
+        B.push("meteor_shower");
+        METEOR_ENABLED = B.define("enabled", true);
+        METEOR_WEIGHT = B.comment("Relative weight when picking a natural disaster.")
+                .defineInRange("weight", 6, 0, 1000);
+        METEOR_BIOMES = B.comment("Biomes (ids or #tags) where meteor showers can happen naturally. Default: every overworld biome.")
+                .defineListAllowEmpty("biomes", List.of("#minecraft:is_overworld"), () -> "#minecraft:is_overworld", o -> o instanceof String);
+        METEOR_DURATION_SCALE = B.comment("Multiplier for how long the impact phase lasts.")
+                .defineInRange("durationScale", 1.0, 0.1, 10.0);
+        METEOR_IMPACT_RATE = B.comment("Multiplier for how many meteors reach the ground.")
+                .defineInRange("impactRate", 1.0, 0.0, 10.0);
+        METEOR_CRATER_SCALE = B.comment("Multiplier for crater size.")
+                .defineInRange("craterScale", 1.0, 0.25, 3.0);
+        METEOR_ORE_CHANCE = B.comment("Chance (0-1) that a block of a meteorite's core is a rare ore instead of meteorite rock.")
+                .defineInRange("oreChance", 0.12, 0.0, 1.0);
+        METEOR_ORES = B.comment("Ores a meteorite core can contain: \"block_id\" or \"block_id*weight\".")
+                .defineListAllowEmpty("ores", List.of("minecraft:iron_ore*8", "minecraft:raw_iron_block*2", "minecraft:gold_ore*4",
+                        "minecraft:diamond_ore*2", "minecraft:emerald_ore*1", "minecraft:ancient_debris*1"),
+                        () -> "minecraft:iron_ore*1", o -> o instanceof String);
+        METEOR_STARTS_FIRES = B.comment("Impacts set fire to the crater rim (only if block destruction is on).")
+                .define("startsFires", true);
         B.pop();
     }
 

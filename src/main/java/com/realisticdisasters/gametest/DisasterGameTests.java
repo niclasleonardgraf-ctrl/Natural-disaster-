@@ -8,6 +8,7 @@ import com.realisticdisasters.disaster.Disaster;
 import com.realisticdisasters.disaster.DisasterManager;
 import com.realisticdisasters.disaster.DisasterType;
 import com.realisticdisasters.disaster.Phase;
+import com.realisticdisasters.disaster.meteor.MeteorShowerDisaster;
 import com.realisticdisasters.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -37,6 +38,10 @@ public final class DisasterGameTests {
         FUNCTIONS.register("tornado_damages_terrain", () -> DisasterGameTests::tornadoDamagesTerrain);
         FUNCTIONS.register("tornado_respects_block_toggle", () -> DisasterGameTests::tornadoRespectsBlockToggle);
         FUNCTIONS.register("tornado_intensity3_tick_cost", () -> DisasterGameTests::tornadoTickCost);
+        FUNCTIONS.register("meteor_impact_makes_crater", () -> DisasterGameTests::meteorImpactMakesCrater);
+        FUNCTIONS.register("meteor_core_contains_ores", () -> DisasterGameTests::meteorCoreContainsOres);
+        FUNCTIONS.register("meteor_respects_block_toggle", () -> DisasterGameTests::meteorRespectsBlockToggle);
+        FUNCTIONS.register("meteor_intensity3_tick_cost", () -> DisasterGameTests::meteorTickCost);
     }
 
     public static void register(IEventBus modBus) {
@@ -49,11 +54,21 @@ public final class DisasterGameTests {
         add(event, "tornado_damages_terrain", event.registerEnvironment(ModRegistries.id("env_terrain")), 500);
         add(event, "tornado_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_toggle")), 300);
         add(event, "tornado_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_perf")), 400);
+        addMeteor(event, "meteor_impact_makes_crater", event.registerEnvironment(ModRegistries.id("env_meteor_crater")), 300);
+        addMeteor(event, "meteor_core_contains_ores", event.registerEnvironment(ModRegistries.id("env_meteor_ores")), 300);
+        addMeteor(event, "meteor_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_meteor_toggle")), 300);
+        addMeteor(event, "meteor_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_meteor_perf")), 400);
     }
 
     private static void add(RegisterGameTestsEvent event, String name, Holder<TestEnvironmentDefinition<?>> env, int maxTicks) {
         var fn = ResourceKey.create(Registries.TEST_FUNCTION, ModRegistries.id(name));
         var data = new TestData<>(env, ModRegistries.id("tornado_arena"), maxTicks, 0, true, Rotation.NONE, false, 1, 1, true, 0);
+        event.registerTest(ModRegistries.id(name), new FunctionGameTestInstance(fn, data));
+    }
+
+    private static void addMeteor(RegisterGameTestsEvent event, String name, Holder<TestEnvironmentDefinition<?>> env, int maxTicks) {
+        var fn = ResourceKey.create(Registries.TEST_FUNCTION, ModRegistries.id(name));
+        var data = new TestData<>(env, ModRegistries.id("meteor_arena"), maxTicks, 0, true, Rotation.NONE, false, 1, 1, true, 0);
         event.registerTest(ModRegistries.id(name), new FunctionGameTestInstance(fn, data));
     }
 
@@ -139,6 +154,120 @@ public final class DisasterGameTests {
             DisasterManager.stop(helper.getLevel(), tornado.id(), false);
             RealisticDisasters.LOGGER.info("Tornado intensity 3 average server cost: {} ms/tick", String.format("%.3f", cost));
             helper.assertTrue(cost < 2.0, "tornado too expensive: " + cost + " ms/tick");
+            helper.succeed();
+        });
+    }
+
+    // ------------------------------------------------------------------ meteor shower (arena: grass at y=11, stone y 0-8)
+
+    private static final int METEOR_GROUND = 11;
+
+    private static MeteorShowerDisaster startMeteorShower(GameTestHelper helper, int intensity) {
+        DisasterConfig.SPAWN_PROTECTION_RADIUS.set(0);
+        BlockPos center = helper.absolutePos(new BlockPos(16, METEOR_GROUND + 1, 16));
+        return (MeteorShowerDisaster) DisasterManager.start(helper.getLevel(), DisasterType.METEOR_SHOWER,
+                Vec3.atBottomCenterOf(center), intensity);
+    }
+
+    private static Vec3 arenaPoint(GameTestHelper helper, double x, double z) {
+        BlockPos p = helper.absolutePos(new BlockPos(0, METEOR_GROUND + 1, 0));
+        return new Vec3(p.getX() + x, p.getY(), p.getZ() + z);
+    }
+
+    private static int countInArena(GameTestHelper helper, java.util.function.Predicate<net.minecraft.world.level.block.state.BlockState> test) {
+        int n = 0;
+        for (int x = 0; x < 32; x++)
+            for (int y = 0; y < 18; y++)
+                for (int z = 0; z < 32; z++)
+                    if (test.test(helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(x, y, z))))) n++;
+        return n;
+    }
+
+    private static boolean scorched(net.minecraft.world.level.block.state.BlockState s) {
+        return s.is(Blocks.BLACKSTONE) || s.is(Blocks.BASALT) || s.is(Blocks.SMOOTH_BASALT) || s.is(Blocks.MAGMA_BLOCK)
+                || s.is(Blocks.COARSE_DIRT);
+    }
+
+    private static void meteorImpactMakesCrater(GameTestHelper helper) {
+        MeteorShowerDisaster shower = startMeteorShower(helper, 4);
+        Pig pig = helper.spawn(EntityType.PIG, new BlockPos(16, METEOR_GROUND + 1, 7));
+        Vec3 pigStart = pig.position();
+        double[] maxPush = {0};
+        helper.onEachTick(() -> {
+            if (pig.isAlive()) maxPush[0] = Math.max(maxPush[0], pig.position().subtract(pigStart).horizontalDistance());
+            else maxPush[0] = Math.max(maxPush[0], 99); // killed by the blast also counts as hit
+        });
+        helper.assertTrue(shower.scheduleAt(arenaPoint(helper, 16.5, 16.5), 1.0f, 20), "target column not loaded");
+
+        helper.succeedWhen(() -> {
+            helper.assertTrue(shower.impactsLanded() >= 1, "meteor has not landed yet");
+            int air = 0;
+            for (int x = 13; x <= 19; x++)
+                for (int z = 13; z <= 19; z++)
+                    for (int y = METEOR_GROUND - 1; y <= METEOR_GROUND; y++)
+                        if (helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(x, y, z))).isAir()) air++;
+            helper.assertTrue(air >= 20, "crater bowl not carved yet (" + air + " air blocks)");
+            int burnt = countInArena(helper, DisasterGameTests::scorched);
+            helper.assertTrue(burnt >= 15, "not enough scorched blocks yet (" + burnt + ")");
+            helper.assertTrue(maxPush[0] > 1.5, "pig was not thrown by the shockwave (" + maxPush[0] + ")");
+            DisasterManager.stop(helper.getLevel(), shower.id(), false);
+        });
+    }
+
+    private static void meteorCoreContainsOres(GameTestHelper helper) {
+        DisasterConfig.METEOR_ORE_CHANCE.set(1.0);
+        MeteorShowerDisaster shower = startMeteorShower(helper, 3);
+        shower.scheduleAt(arenaPoint(helper, 16.5, 16.5), 1.0f, 10);
+        var ores = MeteorShowerDisaster.oreTable();
+        helper.succeedWhen(() -> {
+            helper.assertTrue(shower.impactsLanded() >= 1, "meteor has not landed yet");
+            int found = countInArena(helper, s -> ores.contains(s.getBlock()));
+            helper.assertTrue(found >= 4, "meteorite core has too few ores (" + found + ")");
+            DisasterConfig.METEOR_ORE_CHANCE.set(0.12);
+            DisasterManager.stop(helper.getLevel(), shower.id(), false);
+        });
+    }
+
+    private static void meteorRespectsBlockToggle(GameTestHelper helper) {
+        DisasterConfig.BLOCK_DESTRUCTION.set(false);
+        java.util.Map<BlockPos, net.minecraft.world.level.block.state.BlockState> before = new java.util.HashMap<>();
+        for (int x = 0; x < 32; x++)
+            for (int y = 0; y < 18; y++)
+                for (int z = 0; z < 32; z++) {
+                    BlockPos p = helper.absolutePos(new BlockPos(x, y, z));
+                    before.put(p, helper.getLevel().getBlockState(p));
+                }
+        MeteorShowerDisaster shower = startMeteorShower(helper, 5);
+        shower.scheduleAt(arenaPoint(helper, 16.5, 16.5), 1.5f, 10);
+        shower.scheduleAt(arenaPoint(helper, 6.5, 8.5), 1.0f, 30);
+        shower.scheduleAt(arenaPoint(helper, 25.5, 24.5), 1.0f, 50);
+        helper.runAfterDelay(150, () -> {
+            int count = 0;
+            for (var e : before.entrySet()) if (helper.getLevel().getBlockState(e.getKey()) != e.getValue()) count++;
+            int landed = shower.impactsLanded();
+            DisasterConfig.BLOCK_DESTRUCTION.set(true);
+            DisasterManager.stop(helper.getLevel(), shower.id(), false);
+            helper.assertTrue(landed == 3, "expected 3 impacts, got " + landed);
+            helper.assertTrue(count == 0, "blocks changed although destruction is disabled: " + count);
+            helper.succeed();
+        });
+    }
+
+    private static void meteorTickCost(GameTestHelper helper) {
+        MeteorShowerDisaster shower = startMeteorShower(helper, 3);
+        shower.skipTo(Phase.PEAK);
+        for (int i = 0; i < 6; i++) helper.spawn(EntityType.COW, new BlockPos(6 + i * 4, METEOR_GROUND + 1, 10));
+        // Two craters inside the arena on top of the natural barrage, so carving cost is measured too.
+        shower.scheduleAt(arenaPoint(helper, 10.5, 20.5), 1.0f, 40);
+        shower.scheduleAt(arenaPoint(helper, 22.5, 12.5), 1.0f, 140);
+        helper.runAfterDelay(300, () -> {
+            double cost = DisasterManager.averageTickCostMs(helper.getLevel());
+            int landed = shower.impactsLanded();
+            DisasterManager.stop(helper.getLevel(), shower.id(), false);
+            RealisticDisasters.LOGGER.info("Meteor shower intensity 3 average server cost: {} ms/tick ({} impacts)",
+                    String.format("%.3f", cost), landed);
+            helper.assertTrue(landed >= 2, "expected at least 2 impacts, got " + landed);
+            helper.assertTrue(cost < 2.0, "meteor shower too expensive: " + cost + " ms/tick");
             helper.succeed();
         });
     }
