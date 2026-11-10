@@ -17,11 +17,6 @@ PARTICLES = os.path.join(ROOT, "assets", "realisticdisasters", "textures", "part
 CLOUD = [(236, 236, 232), (206, 207, 201), (172, 174, 168), (138, 140, 134)]
 DUST = [(232, 228, 220), (206, 201, 192), (176, 170, 160), (144, 138, 128)]  # neutral: tinted in code
 DEBRIS = [(118, 86, 54), (92, 66, 40), (86, 120, 52), (64, 92, 38), (128, 128, 128), (98, 98, 98)]
-# Tsunami: deep sea body (vanilla-ish ocean blues), salt mist, white foam with a hint of aqua.
-SEA = [(86, 146, 178), (63, 118, 158), (47, 95, 136), (36, 74, 112)]
-MIST = [(244, 248, 250), (220, 232, 236), (192, 210, 216), (164, 186, 194)]
-FOAM = [(255, 255, 255), (226, 243, 246), (186, 222, 232)]
-
 
 def blob(size, rng, lobes, fill=1.0):
     """Union of a few circles -> boolean mask plus a per-pixel 'height' for shading."""
@@ -240,33 +235,61 @@ def rain_shaft(seed, size=64):
     return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
 
 
-def wave_texture(seed, size=16):
-    """Wave-body puff: sea-blue blob with a few white foam streaks on the upper edge."""
-    rng = random.Random(seed)
-    img = cloud_texture(seed, SEA, size=size, lobes=4)
-    for x in range(size):
-        for y in range(size):
-            if img.getpixel((x, y))[3] == 0:
-                continue
-            above_empty = y == 0 or img.getpixel((x, y - 1))[3] == 0
-            if above_empty and rng.random() < 0.7:
-                img.putpixel((x, y), FOAM[rng.randint(0, 1)] + (255,))
-            elif rng.random() < 0.05:
-                img.putpixel((x, y), FOAM[2] + (255,))
-    return img
+def whitewater(seed, size=64):
+    """Turbulent white water: a dense, billowing foam mass with darker churned veins and a ragged, soft edge.
+    Greyscale; tinted in code (white-grey at sea, brown-grey once it carries sediment inland)."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    n = fbm(size, rng, octaves=6, base=3)
+    veins = np.abs(fbm(size, rng, octaves=5, base=5) - 0.5) * 2      # ridged noise -> churn lines
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    r = np.sqrt(x * x + y * y) + (n - 0.5) * 0.8
+    t = np.clip((0.95 - r) / 0.2, 0, 1)                                # crisper, more liquid edge
+    a = np.clip(t * t * (3 - 2 * t) * (0.9 + 0.4 * n), 0, 1)
+    billow = fbm(size, rng, octaves=4, base=4)                         # bright foam lumps, shaded undersides
+    light = (0.8 + 0.15 * (-y * 0.5 + 0.5) + 0.3 * (billow - 0.5) + 0.12 * (n - 0.5)
+             - 0.1 * np.clip(0.25 - veins, 0, 1) / 0.25)
+    rgb = (np.clip(light, 0, 1) * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
 
 
-def foam_texture(seed, size=8):
-    """Spray droplet: a small cluster of white / pale aqua pixels."""
-    rng = random.Random(seed)
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    cx, cy = rng.randint(3, 4), rng.randint(3, 4)
-    for _ in range(rng.randint(5, 9)):
-        x = max(0, min(size - 1, cx + rng.randint(-2, 2)))
-        y = max(0, min(size - 1, cy + rng.randint(-2, 2)))
-        img.putpixel((x, y), FOAM[rng.randint(0, 2)] + (255,))
-    img.putpixel((cx, cy), FOAM[0] + (255,))
-    return img
+def droplets(seed, size=32):
+    """Spray droplets: a loose cluster of small soft dots of varying size."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    a = np.zeros((size, size))
+    yy, xx = np.mgrid[0:size, 0:size]
+    for _ in range(rng.integers(7, 13)):
+        cx, cy = rng.normal(size / 2, size / 6, 2)
+        rad = rng.uniform(0.8, 2.6)
+        d = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / rad
+        a = np.maximum(a, np.clip(1.2 - d, 0, 1))
+    light = np.full((size, size), 235, dtype="uint8")
+    return Image.fromarray(np.dstack([light, light, light, (np.clip(a, 0, 1) * 255).astype("uint8")]), "RGBA")
+
+
+def flood_debris(seed, size=32):
+    """Floating debris: splintered wood, a leafy twig or a dark clump of mud and plants (coloured, not tinted)."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:size, 0:size].astype(float)
+    a = np.zeros((size, size))
+    col = np.zeros((size, size, 3))
+    kinds = [((112, 82, 52), (84, 60, 38)), ((70, 92, 44), (52, 70, 34)), ((74, 62, 48), (52, 44, 34))]
+    for _ in range(rng.integers(2, 5)):
+        light, dark = kinds[rng.integers(0, 3)]
+        cx, cy = rng.uniform(size * 0.3, size * 0.7, 2)
+        ang = rng.uniform(0, np.pi)
+        length, width = rng.uniform(4, 11), rng.uniform(1.0, 2.6)
+        u = (xx - cx) * np.cos(ang) + (yy - cy) * np.sin(ang)
+        v = -(xx - cx) * np.sin(ang) + (yy - cy) * np.cos(ang)
+        d = np.maximum(np.abs(u) / length, np.abs(v) / width)
+        m = np.clip((1.0 - d) * 3, 0, 1)
+        grain = 0.5 + 0.5 * np.sin(v * 0.9 + u * 0.15 + rng.uniform(0, 6))
+        c = np.array(dark)[None, None, :] + (np.array(light) - np.array(dark))[None, None, :] * grain[:, :, None]
+        col = np.where(m[:, :, None] > a[:, :, None], c, col)
+        a = np.maximum(a, m)
+    return Image.fromarray(np.dstack([col.astype("uint8"), (a * 255).astype("uint8")]), "RGBA")
 
 
 def write(img, name):
@@ -286,9 +309,10 @@ def main():
         write(soft_cloud(200 + i, density=0.85, wispy=True), f"dust_cloud_{i}")
         write(rain_shaft(400 + i), f"rain_shaft_{i}")
         write(debris_texture(300 + i), f"storm_debris_{i}")
-        write(wave_texture(400 + i), f"wave_water_{i}")
-        write(cloud_texture(500 + i, MIST, lobes=4, fill=0.9), f"sea_spray_{i}")
-        write(foam_texture(600 + i), f"wave_foam_{i}")
+        write(whitewater(700 + i), f"wave_water_{i}")
+        write(soft_cloud(800 + i, density=0.7, wispy=True), f"sea_spray_{i}")
+        write(droplets(900 + i), f"wave_foam_{i}")
+        write(flood_debris(1000 + i), f"flood_debris_{i}")
 
     # Realistic rain (overrides vanilla's blue rain texture; applies to all rain in the game).
     env = os.path.join(ROOT, "assets", "minecraft", "textures", "environment")

@@ -42,5 +42,6 @@ public class RealisticDisastersClient {
         event.registerSpriteSet(ModRegistries.WAVE_WATER.get(), s -> WaveParticle.provider(WaveParticle.Kind.WATER, s));
         event.registerSpriteSet(ModRegistries.WAVE_FOAM.get(), s -> WaveParticle.provider(WaveParticle.Kind.FOAM, s));
         event.registerSpriteSet(ModRegistries.SEA_SPRAY.get(), s -> WaveParticle.provider(WaveParticle.Kind.MIST, s));
+        event.registerSpriteSet(ModRegistries.FLOOD_DEBRIS.get(), s -> WaveParticle.provider(WaveParticle.Kind.DEBRIS, s));
     }
 }

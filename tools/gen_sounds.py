@@ -108,14 +108,30 @@ def gust(rng, seconds=3.0):
     return normalize(x * env, 0.7)
 
 
+def crackles(rng, n, rate, sharp=0.004):
+    """Random short broadband impulses (snapping wood, tumbling debris) at roughly `rate` per second."""
+    out = np.zeros(n)
+    count = int(n / RATE * rate)
+    for _ in range(count):
+        start = rng.integers(0, n - int(0.2 * RATE))
+        length = int(rng.uniform(0.01, 0.12) * RATE)
+        t = np.arange(length) / RATE
+        burst = rng.standard_normal(length) * np.exp(-t / rng.uniform(sharp, sharp * 6)) * rng.uniform(0.2, 1.0)
+        out[start:start + length] += burst
+    return out
+
+
 def tsunami_roar(rng, seconds=8.0):
-    """Close layer: a breaking wall of water - deep churning rush, dense white-water hiss, irregular surges."""
+    """Close layer: the bore as heard in real footage - a deep, continuous roar of churning water, with grinding
+    and cracking debris tumbling in it, and irregular surges."""
     n = int(seconds * RATE)
-    low = fast_lowpass(rng.standard_normal(n), 220) * 1.8
-    body = bandpass(rng.standard_normal(n), 300, 1400) * 0.55
-    hiss = bandpass(rng.standard_normal(n), 1800, 7000) * 0.22 * (0.5 + 0.5 * smooth_noise(n, 9, rng))
-    surge = 0.5 + 0.5 * smooth_noise(n, 1.4, rng)
-    x = (low + body + hiss) * surge
+    low = fast_lowpass(rng.standard_normal(n), 160) * 2.0
+    body = bandpass(rng.standard_normal(n), 250, 1200) * 0.6
+    hiss = bandpass(rng.standard_normal(n), 1500, 6000) * 0.18 * (0.5 + 0.5 * smooth_noise(n, 7, rng))
+    grind = bandpass(crackles(rng, n, 30, 0.01), 300, 3000) * 0.5          # dull knocks of debris
+    crack = bandpass(crackles(rng, n, 6, 0.003), 1200, 7000) * 0.35         # occasional sharp snaps
+    surge = 0.55 + 0.45 * smooth_noise(n, 1.2, rng)
+    x = (low + body + hiss + grind) * surge + crack
     return normalize(loopable(x))
 
 
@@ -133,14 +149,15 @@ def tsunami_surf(rng, seconds=12.0):
 
 
 def tsunami_crash(rng, seconds=3.5):
-    """One-shot: a wave slamming down - low thump, sharp broadband attack, long seething tail."""
+    """One-shot: water slamming into something - low thump, broadband crash, splintering wood, seething tail."""
     n = int(seconds * RATE)
     t = np.linspace(0, seconds, n)
     thump = fast_lowpass(rng.standard_normal(n), 90) * np.exp(-t * 4) * 2.0
     crash = bandpass(rng.standard_normal(n), 200, 6000)
     env = np.minimum(t / 0.04, 1) * np.exp(-t * 1.3) * (0.7 + 0.3 * smooth_noise(n, 12, rng))
     seethe = bandpass(rng.standard_normal(n), 2500, 8000) * np.minimum(t / 0.3, 1) * np.exp(-t * 0.9) * 0.25
-    return normalize(thump + crash * env + seethe)
+    splinter = bandpass(crackles(rng, n, 25, 0.003), 900, 7000) * np.exp(-t * 2.0) * 0.6
+    return normalize(thump + crash * env + seethe + splinter)
 
 
 def tsunami_main():

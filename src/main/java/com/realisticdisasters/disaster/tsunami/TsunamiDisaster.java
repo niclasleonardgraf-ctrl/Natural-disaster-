@@ -54,7 +54,8 @@ import net.minecraft.world.phys.Vec3;
 public class TsunamiDisaster extends Disaster {
     /** Indices into the sync data array (shared contract with the client visual). */
     public static final int D_DIR_X = 0, D_DIR_Z = 1, D_FRONT = 2, D_HALF_WIDTH = 3, D_CREST = 4, D_WATER_Y = 5,
-            D_REACH = 6, D_SEA_DIST = 7, D_DRAWBACK = 8, D_WALL = 9;
+            D_REACH = 6, D_SEA_DIST = 7, D_DRAWBACK = 8, D_WALL = 9,
+            D_SURGE = 10, D_SURGE_WALL = 11, D_RISE = 12;
 
     /**
      * Flags for every flood block change: tell clients, but skip neighbour shape updates and onPlace. The placed water
@@ -94,15 +95,34 @@ public class TsunamiDisaster extends Disaster {
     /** A column or block in the local frame. */
     private record Cell(long pos, float axial, float lateral) {}
 
+    /** A flooded column: water is added from {@code filled + 1} up to the rising target over time. */
+    private static final class FloodCol {
+        final int x, z, start, full;
+        int filled;
+
+        FloodCol(int x, int z, int start, int full) {
+            this.x = x;
+            this.z = z;
+            this.start = start;
+            this.full = full;
+            this.filled = start - 1;
+        }
+    }
+
+    private final List<FloodCol> wet = new ArrayList<>();
+    private int raiseCursor;
+    private boolean fishSpawned;
+
     public TsunamiDisaster(ServerLevel level, int id, Vec3 pos, int intensity) {
         super(DisasterType.TSUNAMI, level, id, pos, intensity);
         int i = this.intensity;
         this.halfWidth = 14 + 6 * i;            // 20 .. 44 blocks of coast
         this.reach = 18 + 10 * i;               // 28 .. 68 blocks inland
         this.seaDist = 40 + 8 * i;              // the wave appears 48 .. 80 blocks out
-        this.crestMax = 4 + 2.5f * i;           // 6.5 .. 16.5 blocks above the sea
+        // Real tsunamis arrive as a turbulent bore / fast-rising flood, not a towering curl.
+        this.crestMax = 2.5f + 1.5f * i;        // 4 .. 10 blocks of churning white water above the sea
         this.floodHeight = 2 + i;               // 3 .. 7 blocks of water at the shore
-        this.drawDist = 8 + 2 * i;              // 10 .. 18 blocks of seabed exposed
+        this.drawDist = 14 + 4 * i;             // 18 .. 34 blocks of seabed exposed
         this.drawDepth = 1 + i / 2;             // 1 .. 3 layers
         this.maxHardness = 0.2f + 0.45f * i;    // plants & leaves .. wool, fences, glass panes
         this.maxWater = DisasterConfig.TSUNAMI_MAX_WATER_BLOCKS.getAsInt();
@@ -165,6 +185,31 @@ public class TsunamiDisaster extends Disaster {
         return 1f + (crestMax - 1f) * (float) Math.pow(Math.max(0f, 1f - front / reach), 0.7);
     }
 
+    /** 0..1 how far the flood has risen toward its full height (the water keeps rising after the bore passes). */
+    public float rise() {
+        return switch (phase()) {
+            case WARNING -> 0f;
+            case BUILDUP -> 0.55f;
+            case PEAK -> 0.55f + 0.45f * smooth(phaseProgress() / 0.8f);
+            case AFTERMATH -> 1f - phaseProgress();
+        };
+    }
+
+    /** Second, smaller surge that rolls in over the flood (tsunamis come as a train of waves). */
+    private float surgeProgress() {
+        return phase() == Phase.PEAK ? Mth.clamp((phaseProgress() - 0.5f) / 0.3f, 0f, 1f) : 0f;
+    }
+
+    public float surgeFront() {
+        float q = surgeProgress();
+        return reach * 0.8f * (1f - (1f - q) * (1f - q));
+    }
+
+    public float surgeWall() {
+        float q = surgeProgress();
+        return q <= 0f || q >= 1f ? 0f : 0.55f * Math.min(1f, q * 8f) * (1f - q * q * q);
+    }
+
     private float drawback() {
         return switch (phase()) {
             case WARNING -> smooth((phaseProgress() - 0.1f) / 0.6f);
@@ -196,7 +241,8 @@ public class TsunamiDisaster extends Disaster {
 
     @Override
     protected float[] syncData() {
-        return new float[]{(float) dirX, (float) dirZ, front, halfWidth, crest(), waterY, reach, seaDist, drawback(), wall()};
+        return new float[]{(float) dirX, (float) dirZ, front, halfWidth, crest(), waterY, reach, seaDist, drawback(), wall(),
+                surgeFront(), surgeWall(), rise()};
     }
 
     // ------------------------------------------------------------------ shore detection
@@ -308,6 +354,7 @@ public class TsunamiDisaster extends Disaster {
         switch (phase()) {
             case WARNING -> {
                 if (blocks && shoreFound) withdrawSea();
+                if (!fishSpawned && drawback() > 0.6f && withdrawnOrder.size() > 8) strandFish();
             }
             case BUILDUP, PEAK -> {
                 refillSea();
@@ -321,7 +368,8 @@ public class TsunamiDisaster extends Disaster {
         feedQueue();
 
         if (age() % 20 == 0 && (phase() != Phase.AFTERMATH)) alertMobs();
-        if (wall() > 0.05f) pushAtFront(wall());
+        if (wall() > 0.05f) pushAtFront(front, wall());
+        if (surgeWall() > 0.05f) pushAtFront(surgeFront(), surgeWall());
         if (age() % 4 == 0 && (phase() == Phase.PEAK || phase() == Phase.AFTERMATH)) applyCurrent();
     }
 
@@ -370,6 +418,25 @@ public class TsunamiDisaster extends Disaster {
         withdrawnOrder.add(new Cell(bp.asLong(), axial, 0));
     }
 
+    /** Fish left flopping on the exposed seabed: one of the classic warning signs. */
+    private void strandFish() {
+        fishSpawned = true;
+        int n = 2 + intensity;
+        for (int k = 0; k < n; k++) {
+            BlockPos bp = BlockPos.of(withdrawnOrder.get(random.nextInt(withdrawnOrder.size())).pos());
+            if (!level.getBlockState(bp).isAir()) continue;
+            var type = switch (random.nextInt(3)) {
+                case 0 -> net.minecraft.world.entity.EntityType.SALMON;
+                case 1 -> net.minecraft.world.entity.EntityType.TROPICAL_FISH;
+                default -> net.minecraft.world.entity.EntityType.COD;
+            };
+            Entity fish = type.create(level, net.minecraft.world.entity.EntitySpawnReason.EVENT);
+            if (fish == null) continue;
+            fish.snapTo(bp.getX() + 0.5, bp.getY(), bp.getZ() + 0.5, random.nextFloat() * 360f, 0f);
+            level.addFreshEntity(fish);
+        }
+    }
+
     /** As the wave passes, water returns where the sea drew back (deepest layer first). */
     private void refillSea() {
         while (restoreIndex < withdrawnOrder.size() && withdrawnOrder.get(restoreIndex).axial() <= front + 1) {
@@ -393,6 +460,14 @@ public class TsunamiDisaster extends Disaster {
         while (floodIndex < floodColumns.size() && floodColumns.get(floodIndex).axial() <= front) {
             floodColumn(floodColumns.get(floodIndex++));
         }
+        // The water keeps rising behind the bore: top up a slice of the flooded columns each tick.
+        if (!wet.isEmpty()) {
+            int n = Math.min(wet.size(), Math.max(24, wet.size() / 30));
+            for (int k = 0; k < n; k++) {
+                if (raiseCursor >= wet.size()) raiseCursor = 0;
+                raise(wet.get(raiseCursor++));
+            }
+        }
     }
 
     private void floodColumn(Cell col) {
@@ -414,10 +489,19 @@ public class TsunamiDisaster extends Disaster {
                     && floodable(level.getBlockState(new BlockPos(x, start - 1, z)))) start--;
         }
         if (surface - start + 1 > floodHeight + 3) return; // a deep pit or the edge of the world: leave it
-        for (int y = start; y <= surface; y++) {
-            BlockPos bp = new BlockPos(x, y, z);
+        FloodCol fc = new FloodCol(x, z, start, surface);
+        wet.add(fc);
+        raise(fc);
+    }
+
+    private void raise(FloodCol c) {
+        int target = Math.max(c.start, waterY + Math.round((c.full - waterY) * rise()));
+        target = Math.min(target, c.full);
+        for (int y = c.filled + 1; y <= target; y++) {
+            BlockPos bp = new BlockPos(c.x, y, c.z);
             pending.add(l -> placeWater(bp));
         }
+        c.filled = Math.max(c.filled, target);
     }
 
     private boolean floodable(BlockState st) {
@@ -453,7 +537,7 @@ public class TsunamiDisaster extends Disaster {
             if (!st.getFluidState().isEmpty() || st.hasBlockEntity()) return; // existing water is never touched
             float hardness = st.getDestroySpeed(level, bp);
             boolean weak = st.canBeReplaced() || hardness >= 0 && hardness <= maxHardness && !st.blocksMotion()
-                    || st.is(net.minecraft.tags.BlockTags.LEAVES);
+                    || st.is(net.minecraft.tags.BlockTags.LEAVES) || smashesWood(st, bp);
             if (!weak) return;
             if (!DisasterProtection.canModify(level, bp, st)) return;
             // Smashed by the wave: break effect + drops (floating debris), then the water takes its place.
@@ -472,6 +556,17 @@ public class TsunamiDisaster extends Disaster {
         }
         if (floodBox == null) floodBox = BoundingBox.fromCorners(bp, bp);
         else floodBox.encapsulate(bp);
+    }
+
+    /** Strong tsunamis tear wooden buildings apart near the coast; the pieces become floating debris. */
+    private boolean smashesWood(BlockState st, BlockPos bp) {
+        if (intensity < 3 || st.hasBlockEntity()) return false;
+        boolean wood = st.is(net.minecraft.tags.BlockTags.PLANKS) || st.is(net.minecraft.tags.BlockTags.LOGS)
+                || st.is(net.minecraft.tags.BlockTags.WOODEN_FENCES) || st.is(net.minecraft.tags.BlockTags.WOOL)
+                || st.is(net.minecraft.tags.BlockTags.WOODEN_SLABS) || st.is(net.minecraft.tags.BlockTags.WOODEN_STAIRS);
+        if (!wood) return false;
+        float near = 1f - (float) Mth.clamp(axialOf(bp.getX() + 0.5, bp.getZ() + 0.5) / reach, 0, 1);
+        return random.nextFloat() < 0.3f * (intensity - 2) * near;
     }
 
     // ------------------------------------------------------------------ recession
@@ -628,8 +723,8 @@ public class TsunamiDisaster extends Disaster {
     // ------------------------------------------------------------------ entities
 
     /** The breaking wave shoves everything in its path inland and knocks it about. */
-    private void pushAtFront(float wall) {
-        AABB box = bandBox(front - 6, front + 2, halfWidth, waterY - 4, waterY + crest() + 3);
+    private void pushAtFront(float front, float wall) {
+        AABB box = bandBox(front - 6, front + 2, halfWidth, waterY - 4, waterY + crestMax + 3);
         DamageSource source = level.damageSources().source(ModRegistries.TSUNAMI_DAMAGE);
         double push = (0.22 + 0.05 * intensity) * wall;
         for (Entity e : level.getEntities((Entity) null, box, e -> !e.isSpectator())) {
