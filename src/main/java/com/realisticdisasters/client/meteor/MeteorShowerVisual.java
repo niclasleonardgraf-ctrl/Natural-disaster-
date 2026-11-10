@@ -250,15 +250,15 @@ public final class MeteorShowerVisual implements DisasterVisual {
                 int steps = Math.max(1, (int) Math.ceil(s.vel.length() / spacing));
                 for (int i = 0; i < steps; i++) {
                     Vec3 at = s.pos.add(s.vel.scale(i / (double) steps));
-                    glow(at, Vec3.ZERO, width, 4 + RANDOM.nextInt(3), s.head, new float[]{1f, 0.55f, 0.25f}, 0.85f, 1f);
-                    if (s.train && RANDOM.nextFloat() < 0.35f) {
-                        // Persistent train: faint, slowly fading and spreading ionised trail.
-                        glow(at, jitter(0.01), width * 1.3f, 40 + RANDOM.nextInt(50), new float[]{0.7f, 0.95f, 0.8f},
-                                new float[]{0.25f, 0.4f, 0.45f}, 0.22f, 2.2f);
+                    glow(at, Vec3.ZERO, width, 4 + RANDOM.nextInt(3), s.head, new float[]{1f, 0.72f, 0.48f}, 0.85f, 1f);
+                    if (s.train && (i & 1) == 0) {
+                        // Persistent train: a faint, continuous, slowly spreading ionised glow (often greenish).
+                        glow(at, Vec3.ZERO, width * 2.5f, 40 + RANDOM.nextInt(40), new float[]{0.72f, 0.95f, 0.82f},
+                                new float[]{0.3f, 0.45f, 0.5f}, 0.13f, 2f);
                     }
                 }
-                glow(s.pos, s.vel, width * 2.2f, 2, s.head, s.head, 1f, 1f);
-                if (s.flare && s.life == 1) {
+                head(s.pos, s.vel, width * 2.2f, s.head, 1f);
+                if (s.flare && s.life == 1) { // terminal flare
                     glow(next, Vec3.ZERO, width * 6f, 4, s.head, new float[]{1f, 0.7f, 0.4f}, 1f, 1.4f);
                 }
             }
@@ -338,16 +338,15 @@ public final class MeteorShowerVisual implements DisasterVisual {
             float lod = far < 128 ? 1f : far < 256 ? 0.6f : 0.3f;
             // Readable size at any distance, but never a giant sprite up close.
             float core = (1.3f + m.size * 2f) * (float) Math.max(1.0, far / 90.0);
-            // Blinding white head inside a large coloured halo (the halo lights the smoke around it).
-            spawn(ModRegistries.METEOR_FIREBALL.get(), head, vel, p -> p.size(core));
-            glow(head, vel, core * 2.2f, 2, new float[]{1f, 0.97f, 0.9f}, m.halo, 0.7f, 1f);
-            glow(head, vel, core * 4.5f, 2, m.halo, m.halo, 0.3f, 1f);
-            // Continuous incandescent wake: densely packed glows that cool from white to orange-red behind the head.
-            int wake = Math.max(3, (int) Math.ceil(FLIGHT_SPEED / Math.max(0.25, core * 0.22)));
-            for (int i = 1; i <= wake; i++) {
-                Vec3 at = head.subtract(vel.scale(i / (double) wake));
-                glow(at, Vec3.ZERO, core * 0.9f, 7 + RANDOM.nextInt(5), new float[]{1f, 0.93f, 0.75f},
-                        new float[]{0.85f, 0.3f, 0.1f}, 0.75f, 0.6f);
+            // Spawn order matters: translucent particles draw in spawn order, so smoke goes first and the head last.
+            // The smoke trail: thick, hangs in the sky for several seconds, behind the incandescent wake.
+            int smoke = count((2 + m.size * 3) * density * lod);
+            for (int i = 0; i < smoke; i++) {
+                Vec3 at = head.subtract(vel.scale(1.8 + RANDOM.nextDouble() * 1.4)).add(jitter(core * 0.25));
+                float g = 0.38f + RANDOM.nextFloat() * 0.14f;
+                float sz = Math.min(4f, core * (0.6f + RANDOM.nextFloat() * 0.4f));
+                spawn(ModRegistries.METEOR_SMOKE.get(), at, jitter(0.015), p -> p.size(sz).grow(3f).life(140 + RANDOM.nextInt(120))
+                        .alpha(0.45f).drag(0.98f).colors(g * 1.05f, g, g * 0.95f, g, g, g));
             }
             // Fragments shedding off the head.
             int frags = count((1 + m.size * 2.5f) * density * lod);
@@ -355,17 +354,17 @@ public final class MeteorShowerVisual implements DisasterVisual {
                 Vec3 v = vel.scale(0.55 + RANDOM.nextDouble() * 0.3).add(jitter(0.25));
                 spawn(ModRegistries.METEOR_EMBER.get(), head.add(jitter(core * 0.3)), v, p -> p.drag(0.9f).life(8 + RANDOM.nextInt(10)));
             }
-            // The smoke trail: thick, hangs in the sky for several seconds, lit by the fireball near the head.
-            int smoke = count((2 + m.size * 3) * density * lod);
-            for (int i = 0; i < smoke; i++) {
-                Vec3 at = head.subtract(vel.scale(0.3 + RANDOM.nextDouble() * 1.4)).add(jitter(core * 0.25));
-                float g = 0.38f + RANDOM.nextFloat() * 0.14f;
-                float sz = Math.min(4f, core * (0.6f + RANDOM.nextFloat() * 0.4f));
-                // Starts behind the wake (2+ ticks back) so the incandescent part stays continuous.
-                Vec3 behind = at.subtract(vel.scale(1.5));
-                spawn(ModRegistries.METEOR_SMOKE.get(), behind, jitter(0.015), p -> p.size(sz).grow(3f).life(140 + RANDOM.nextInt(120))
-                        .alpha(0.45f).drag(0.98f).colors(g * 1.05f, g, g * 0.95f, g, g, g));
+            // Continuous incandescent wake: densely packed glows that cool from white to orange-red behind the head.
+            int wake = Math.max(3, (int) Math.ceil(FLIGHT_SPEED / Math.max(0.25, core * 0.22)));
+            for (int i = 1; i <= wake; i++) {
+                Vec3 at = head.subtract(vel.scale(i / (double) wake));
+                glow(at, Vec3.ZERO, core * 0.9f, 7 + RANDOM.nextInt(5), new float[]{1f, 0.93f, 0.75f},
+                        new float[]{0.85f, 0.3f, 0.1f}, 0.75f, 0.6f);
             }
+            // Large coloured halo, inner halo, then the blinding white head on top.
+            head(head, vel, core * 4.5f, m.halo, 0.3f);
+            head(head, vel, core * 2.2f, new float[]{1f, 0.97f, 0.9f}, 0.7f);
+            spawn(ModRegistries.METEOR_FIREBALL.get(), head, vel, p -> p.size(core).life(1));
         }
     }
 
@@ -513,6 +512,12 @@ public final class MeteorShowerVisual implements DisasterVisual {
     private static void spawn(SimpleParticleType type, Vec3 at, Vec3 vel, java.util.function.Consumer<MeteorParticle> setup) {
         Particle particle = Minecraft.getInstance().particleEngine.createParticle(type, at.x, at.y, at.z, vel.x, vel.y, vel.z);
         if (particle instanceof MeteorParticle mp) setup.accept(mp);
+    }
+
+    /** A sprite that rides exactly on a moving head for one tick (no drag, no lingering = no "beads"). */
+    private static void head(Vec3 at, Vec3 vel, float size, float[] color, float alpha) {
+        spawn(ModRegistries.METEOR_STREAK.get(), at, vel, p -> p.size(size).life(1).drag(1f).alpha(alpha)
+                .colors(color[0], color[1], color[2], color[0], color[1], color[2]));
     }
 
     private static void glow(Vec3 at, Vec3 vel, float size, int life, float[] from, float[] to, float alpha, float grow) {
