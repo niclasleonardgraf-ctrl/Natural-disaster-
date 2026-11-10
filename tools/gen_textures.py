@@ -76,57 +76,79 @@ def debris_texture(seed, size=8):
     return img
 
 
-# Meteor palettes: hot white core -> yellow -> orange -> red rim. Streak/ember sprites stay pale because the
-# particle code tints them as they cool.
-FIRE = [(255, 255, 240), (255, 236, 140), (255, 168, 52), (214, 84, 26)]
-GLOW = [(255, 255, 255), (240, 240, 228), (210, 210, 196)]
+# Meteor textures are deliberately NOT hard pixel art: light and smoke are soft in reality, so these are smooth
+# alpha gradients (white, tinted per particle in code). Smoke keeps a faint 2x2-texel grain so it sits next to
+# vanilla blocks without looking like a photo.
 
 
-def fireball_texture(seed, size=16):
-    """Round, slightly ragged glowing blob with hard colour bands."""
-    rng = random.Random(seed)
+def soft_glow(size, sigma, core=0.0):
+    """Gaussian glow: alpha falls off smoothly; optional flat white-hot core radius (fraction of size)."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     c = size / 2
     for y in range(size):
         for x in range(size):
-            d = math.hypot(x + 0.5 - c, y + 0.5 - c) / (size * 0.47) + rng.uniform(-0.08, 0.08)
-            if d > 1.0:
+            d = math.hypot(x + 0.5 - c, y + 0.5 - c) / c
+            a = math.exp(-(d / sigma) ** 2)
+            if d < core:
+                a = 1.0
+            if d >= 1.0:
+                a = 0.0
+            a = max(0.0, min(1.0, a * 1.05))
+            img.putpixel((x, y), (255, 255, 255, int(a * 255)))
+    return img
+
+
+def fireball_texture(seed, size=32):
+    rng = random.Random(seed)
+    img = soft_glow(size, 0.42 + rng.uniform(-0.03, 0.03), core=0.18)
+    return img
+
+
+def streak_texture(seed, size=32):
+    rng = random.Random(seed)
+    return soft_glow(size, 0.36 + seed % 4 * 0.03)
+
+
+def ember_texture(seed, size=16):
+    return soft_glow(size, 0.45 + seed % 2 * 0.1, core=0.15)
+
+
+def value_noise(size, cells, rng):
+    grid = [[rng.random() for _ in range(cells + 1)] for _ in range(cells + 1)]
+    out = [[0.0] * size for _ in range(size)]
+    for y in range(size):
+        for x in range(size):
+            gx, gy = x / size * cells, y / size * cells
+            ix, iy = int(gx), int(gy)
+            fx, fy = gx - ix, gy - iy
+            fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+            a = grid[iy][ix] * (1 - fx) + grid[iy][ix + 1] * fx
+            b = grid[iy + 1][ix] * (1 - fx) + grid[iy + 1][ix + 1] * fx
+            out[y][x] = a * (1 - fy) + b * fy
+    return out
+
+
+def smoke_texture(seed, size=32):
+    """Soft billowy puff: a few overlapping lobes, low-frequency noise, light from above, 2x2 texel grain."""
+    rng = random.Random(seed)
+    lobes = [(rng.uniform(0.38, 0.62) * size, rng.uniform(0.4, 0.62) * size, rng.uniform(0.2, 0.3) * size) for _ in range(4)]
+    n1 = value_noise(size, 4, rng)
+    n2 = value_noise(size, 8, rng)
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    for y in range(0, size, 2):
+        for x in range(0, size, 2):
+            dens = 0.0
+            for cx, cy, r in lobes:
+                d = math.hypot(x + 1 - cx, y + 1 - cy) / r
+                dens = max(dens, 1 - d * d)
+            if dens <= 0:
                 continue
-            idx = 0 if d < 0.3 else 1 if d < 0.55 else 2 if d < 0.8 else 3
-            img.putpixel((x, y), FIRE[idx] + (255,))
-    return img
-
-
-def streak_texture(seed, size=8):
-    """Small star-like glow: bright centre, paler arms."""
-    rng = random.Random(seed)
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    arm = 2 + seed % 2
-    for i in range(-arm, arm):
-        img.putpixel((4 + i, 3), GLOW[2] + (255,))
-        img.putpixel((4 + i, 4), GLOW[2] + (255,))
-        img.putpixel((3, 4 + i), GLOW[2] + (255,))
-        img.putpixel((4, 4 + i), GLOW[2] + (255,))
-    for x in range(2, 6):
-        for y in range(2, 6):
-            if rng.random() < 0.85:
-                img.putpixel((x, y), GLOW[1] + (255,))
-    for x in (3, 4):
-        for y in (3, 4):
-            img.putpixel((x, y), GLOW[0] + (255,))
-    return img
-
-
-def ember_texture(seed, size=8):
-    rng = random.Random(seed)
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    w = 2 + seed % 2
-    ox = 3 - w // 2
-    for x in range(w):
-        for y in range(w):
-            img.putpixel((ox + x, ox + y), GLOW[0 if (x + y) % 2 == 0 else 1] + (255,))
-    if rng.random() < 0.6:
-        img.putpixel((ox + w, ox + rng.randint(0, w - 1)), GLOW[2] + (255,))
+            dens = dens * (0.6 + 0.4 * n1[y][x]) * (0.85 + 0.3 * n2[y][x])
+            a = max(0.0, min(1.0, dens ** 1.4 * 1.5))
+            shade = int(255 * (0.82 + 0.18 * (1 - y / size)) * (0.9 + 0.1 * n2[y][x]))
+            for oy in range(2):
+                for ox in range(2):
+                    img.putpixel((x + ox, y + oy), (shade, shade, shade, int(a * 235)))
     return img
 
 
@@ -163,6 +185,7 @@ def main():
         write(fireball_texture(400 + i), f"meteor_fireball_{i}")
         write(streak_texture(500 + i), f"meteor_streak_{i}")
         write(ember_texture(600 + i), f"meteor_ember_{i}")
+        write(smoke_texture(700 + i), f"meteor_smoke_{i}")
 
 
 if __name__ == "__main__":

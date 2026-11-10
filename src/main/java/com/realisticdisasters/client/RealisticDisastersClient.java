@@ -33,8 +33,9 @@ public class RealisticDisastersClient {
         event.registerSpriteSet(ModRegistries.FUNNEL_CLOUD.get(), s -> VortexParticle.provider(VortexParticle.Kind.CLOUD, s));
         event.registerSpriteSet(ModRegistries.STORM_DEBRIS.get(), s -> VortexParticle.provider(VortexParticle.Kind.DEBRIS, s));
         event.registerSpriteSet(ModRegistries.DUST_CLOUD.get(), s -> VortexParticle.provider(VortexParticle.Kind.DUST, s));
-        event.registerSpriteSet(ModRegistries.METEOR_STREAK.get(), s -> MeteorParticle.provider(MeteorParticle.Kind.TRAIL, s));
+        event.registerSpriteSet(ModRegistries.METEOR_STREAK.get(), s -> MeteorParticle.provider(MeteorParticle.Kind.GLOW, s));
         event.registerSpriteSet(ModRegistries.METEOR_FIREBALL.get(), s -> MeteorParticle.provider(MeteorParticle.Kind.FIREBALL, s));
         event.registerSpriteSet(ModRegistries.METEOR_EMBER.get(), s -> MeteorParticle.provider(MeteorParticle.Kind.EMBER, s));
+        event.registerSpriteSet(ModRegistries.METEOR_SMOKE.get(), s -> MeteorParticle.provider(MeteorParticle.Kind.SMOKE, s));
     }
 }

@@ -42,7 +42,7 @@ public class MeteorShowerDisaster extends Disaster {
     /** Indices into the sync data array (shared contract with the client visual). */
     public static final int D_SCATTER = 0, D_RADIANT_X = 1, D_RADIANT_Z = 2, D_SLOTS = 3;
     /** Ring buffer of recent / incoming meteors: SLOT_COUNT slots of SLOT_SIZE floats starting at {@link #D_SLOTS}. */
-    public static final int SLOT_COUNT = 5, SLOT_SIZE = 6;
+    public static final int SLOT_COUNT = 4, SLOT_SIZE = 6; // 3 + 4 * 6 = 27 floats; the sync payload carries at most 32
     /** Offsets inside a slot: sequence number (0 = empty), offset from the disaster centre, size, ticks until impact. */
     public static final int S_SEQ = 0, S_DX = 1, S_DY = 2, S_DZ = 3, S_SIZE = 4, S_TICKS = 5;
     /** Time from a meteor becoming visible to its impact. */

@@ -42,6 +42,7 @@ public final class DisasterGameTests {
         FUNCTIONS.register("meteor_core_contains_ores", () -> DisasterGameTests::meteorCoreContainsOres);
         FUNCTIONS.register("meteor_respects_block_toggle", () -> DisasterGameTests::meteorRespectsBlockToggle);
         FUNCTIONS.register("meteor_intensity3_tick_cost", () -> DisasterGameTests::meteorTickCost);
+        FUNCTIONS.register("meteor_sync_payload_roundtrip", () -> DisasterGameTests::meteorSyncRoundTrip);
     }
 
     public static void register(IEventBus modBus) {
@@ -58,6 +59,7 @@ public final class DisasterGameTests {
         addMeteor(event, "meteor_core_contains_ores", event.registerEnvironment(ModRegistries.id("env_meteor_ores")), 300);
         addMeteor(event, "meteor_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_meteor_toggle")), 300);
         addMeteor(event, "meteor_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_meteor_perf")), 400);
+        addMeteor(event, "meteor_sync_payload_roundtrip", event.registerEnvironment(ModRegistries.id("env_meteor_sync")), 100);
     }
 
     private static void add(RegisterGameTestsEvent event, String name, Holder<TestEnvironmentDefinition<?>> env, int maxTicks) {
@@ -184,8 +186,10 @@ public final class DisasterGameTests {
     }
 
     private static boolean scorched(net.minecraft.world.level.block.state.BlockState s) {
+        // melt, breccia lining, ejecta and burnt turf
         return s.is(Blocks.BLACKSTONE) || s.is(Blocks.BASALT) || s.is(Blocks.SMOOTH_BASALT) || s.is(Blocks.MAGMA_BLOCK)
-                || s.is(Blocks.COARSE_DIRT);
+                || s.is(Blocks.OBSIDIAN) || s.is(Blocks.COARSE_DIRT) || s.is(Blocks.GRAVEL) || s.is(Blocks.COBBLESTONE)
+                || s.is(Blocks.TUFF);
     }
 
     private static void meteorImpactMakesCrater(GameTestHelper helper) {
@@ -208,7 +212,14 @@ public final class DisasterGameTests {
                         if (helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(x, y, z))).isAir()) air++;
             helper.assertTrue(air >= 20, "crater bowl not carved yet (" + air + " air blocks)");
             int burnt = countInArena(helper, DisasterGameTests::scorched);
-            helper.assertTrue(burnt >= 15, "not enough scorched blocks yet (" + burnt + ")");
+            helper.assertTrue(burnt >= 25, "not enough lining / ejecta / scorched blocks yet (" + burnt + ")");
+            int rim = 0; // raised rim: blocks above the old ground level just outside the bowl
+            for (int x = 0; x < 32; x++)
+                for (int z = 0; z < 32; z++) {
+                    double dd = Math.hypot(x + 0.5 - 16.5, z + 0.5 - 16.5);
+                    if (dd > 4 && dd < 9 && !helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(x, METEOR_GROUND + 1, z))).isAir()) rim++;
+                }
+            helper.assertTrue(rim >= 10, "no raised rim yet (" + rim + ")");
             helper.assertTrue(maxPush[0] > 1.5, "pig was not thrown by the shockwave (" + maxPush[0] + ")");
             DisasterManager.stop(helper.getLevel(), shower.id(), false);
         });
@@ -270,6 +281,25 @@ public final class DisasterGameTests {
             helper.assertTrue(cost < 2.0, "meteor shower too expensive: " + cost + " ms/tick");
             helper.succeed();
         });
+    }
+
+    /** The sync packet must decode to exactly what was sent (the client disconnects on leftover bytes). */
+    private static void meteorSyncRoundTrip(GameTestHelper helper) {
+        MeteorShowerDisaster shower = startMeteorShower(helper, 5);
+        for (int i = 0; i < MeteorShowerDisaster.SLOT_COUNT + 2; i++) {
+            shower.scheduleAt(arenaPoint(helper, 4.5 + i * 4, 16.5), 1.0f, 60 + i);
+        }
+        var sent = shower.toPayload();
+        var buf = new net.minecraft.network.RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.buffer(),
+                helper.getLevel().registryAccess());
+        com.realisticdisasters.network.DisasterSyncPayload.CODEC.encode(buf, sent);
+        var received = com.realisticdisasters.network.DisasterSyncPayload.CODEC.decode(buf);
+        int leftover = buf.readableBytes();
+        DisasterManager.stop(helper.getLevel(), shower.id(), false);
+        helper.assertTrue(leftover == 0, "sync payload left " + leftover + " unread bytes");
+        helper.assertTrue(java.util.Arrays.equals(sent.data(), received.data()), "sync data changed in transit");
+        helper.assertTrue(sent.data()[MeteorShowerDisaster.D_SLOTS] > 0, "no meteor in the ring buffer");
+        helper.succeed();
     }
 
     private DisasterGameTests() {}

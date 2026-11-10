@@ -39,6 +39,8 @@ public final class ModRegistries {
             PARTICLES.register("meteor_fireball", () -> new SimpleParticleType(true));
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> METEOR_EMBER =
             PARTICLES.register("meteor_ember", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> METEOR_SMOKE =
+            PARTICLES.register("meteor_smoke", () -> new SimpleParticleType(true));
 
     // Data-driven damage type (data/realisticdisasters/damage_type/tornado.json)
     public static final ResourceKey<DamageType> TORNADO_DAMAGE =
