@@ -88,5 +88,45 @@ def arena():
     write_structure("tornado_arena", (sx, sy, sz), blocks)
 
 
+def tsunami_arena():
+    """A walled strip of sea (x 0-15, surface y4), a sand beach (x 16-19) and flat grassland with plants and a small
+    pre-existing pond (a water source at 24,5,24 inside a cobblestone ring) that the flood must leave alone."""
+    sx, sy, sz = 56, 12, 48
+    blocks = {}
+    for x in range(sx):
+        for z in range(sz):
+            blocks[(x, 0, z)] = "minecraft:stone"
+            if x < 16:
+                wall = x == 0 or z == 0 or z == sz - 1
+                for y in range(1, 5):
+                    blocks[(x, y, z)] = "minecraft:stone" if wall else "minecraft:water"
+                if wall:
+                    blocks[(x, 5, z)] = "minecraft:stone"
+            else:
+                for y in range(1, 4):
+                    blocks[(x, y, z)] = "minecraft:dirt"
+                blocks[(x, 4, z)] = "minecraft:sand" if x < 20 else "minecraft:grass_block"
+    # the pond: water on dirt, ringed by cobblestone
+    blocks[(24, 4, 24)] = "minecraft:dirt"
+    blocks[(24, 5, 24)] = "minecraft:water"
+    for x in range(23, 26):
+        for z in range(23, 26):
+            blocks[(x, 4, z)] = "minecraft:dirt"  # grass would die under the ring
+            if (x, z) != (24, 24):
+                blocks[(x, 5, z)] = "minecraft:cobblestone"
+    # plants for the wave to tear out
+    for x in range(22, 46, 3):
+        for z in range(6, 43, 4):
+            if 22 <= x <= 26 and 22 <= z <= 26:
+                continue
+            blocks[(x, 5, z)] = "minecraft:poppy" if (x + z) % 3 == 0 else "minecraft:short_grass"
+    for x in range(sx):
+        for y in range(1, sy):
+            for z in range(sz):
+                blocks.setdefault((x, y, z), "minecraft:air")
+    write_structure("tsunami_arena", (sx, sy, sz), blocks)
+
+
 if __name__ == "__main__":
     arena()
+    tsunami_arena()

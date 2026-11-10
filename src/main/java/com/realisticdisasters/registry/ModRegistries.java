@@ -26,6 +26,9 @@ public final class ModRegistries {
     public static final DeferredHolder<SoundEvent, SoundEvent> DEBRIS_THUD = sound("disaster.debris_thud");
     public static final DeferredHolder<SoundEvent, SoundEvent> WOOD_SNAP = sound("disaster.wood_snap");
     public static final DeferredHolder<SoundEvent, SoundEvent> DEBRIS_RATTLE = sound("disaster.debris_rattle");
+    public static final DeferredHolder<SoundEvent, SoundEvent> TSUNAMI_ROAR = sound("disaster.tsunami.roar");
+    public static final DeferredHolder<SoundEvent, SoundEvent> TSUNAMI_SURF = sound("disaster.tsunami.surf");
+    public static final DeferredHolder<SoundEvent, SoundEvent> TSUNAMI_CRASH = sound("disaster.tsunami.crash");
 
     // Particles
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FUNNEL_CLOUD =
@@ -46,10 +49,20 @@ public final class ModRegistries {
             PARTICLES.register("rain_shaft", () -> new SimpleParticleType(true));
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> DUST_CLOUD =
             PARTICLES.register("dust_cloud", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> WAVE_FOAM =
+            PARTICLES.register("wave_foam", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> SEA_SPRAY =
+            PARTICLES.register("sea_spray", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> WAVE_WATER =
+            PARTICLES.register("wave_water", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FLOOD_DEBRIS =
+            PARTICLES.register("flood_debris", () -> new SimpleParticleType(true));
 
     // Data-driven damage type (data/realisticdisasters/damage_type/tornado.json)
     public static final ResourceKey<DamageType> TORNADO_DAMAGE =
             ResourceKey.create(Registries.DAMAGE_TYPE, id("tornado"));
+    public static final ResourceKey<DamageType> TSUNAMI_DAMAGE =
+            ResourceKey.create(Registries.DAMAGE_TYPE, id("tsunami"));
 
     private static DeferredHolder<SoundEvent, SoundEvent> sound(String name) {
         return SOUNDS.register(name, () -> SoundEvent.createVariableRangeEvent(id(name)));

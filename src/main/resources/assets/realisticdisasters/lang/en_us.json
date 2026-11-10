@@ -2,6 +2,9 @@
   "disaster.realisticdisasters.tornado": "Tornado",
   "disaster.realisticdisasters.tornado.warning": "The sky turns a sickly green... a storm is organising nearby.",
   "disaster.realisticdisasters.tornado.touchdown": "A funnel is reaching for the ground! Take shelter!",
+  "disaster.realisticdisasters.tsunami": "Tsunami",
+  "disaster.realisticdisasters.tsunami.warning": "The sea is pulling back from the shore... get to high ground!",
+  "disaster.realisticdisasters.tsunami.wave": "A wall of water is racing toward the coast!",
 
   "phase.realisticdisasters.warning": "Warning",
   "phase.realisticdisasters.buildup": "Buildup",
@@ -19,6 +22,8 @@
 
   "death.attack.realisticdisasters.tornado": "%1$s was swept away by a tornado",
   "death.attack.realisticdisasters.tornado.player": "%1$s was swept away by a tornado while fighting %2$s",
+  "death.attack.realisticdisasters.tsunami": "%1$s was swallowed by a tsunami",
+  "death.attack.realisticdisasters.tsunami.player": "%1$s was swallowed by a tsunami while fighting %2$s",
 
   "subtitles.realisticdisasters.tornado.roar": "Tornado roars",
   "subtitles.realisticdisasters.tornado.distant": "Distant rumbling wind",
@@ -29,6 +34,9 @@
   "subtitles.realisticdisasters.debris_thud": "Debris crashes",
   "subtitles.realisticdisasters.wood_snap": "Tree snaps",
   "subtitles.realisticdisasters.debris_rattle": "Debris rattles",
+  "subtitles.realisticdisasters.tsunami.roar": "Tsunami roars",
+  "subtitles.realisticdisasters.tsunami.surf": "Heavy surf",
+  "subtitles.realisticdisasters.tsunami.crash": "Wave crashes",
 
   "realisticdisasters.configuration.title": "Realistic Natural Disasters",
   "realisticdisasters.configuration.section.realisticdisasters.common.toml": "Disasters (server)",
@@ -38,6 +46,7 @@
   "realisticdisasters.configuration.general": "General",
   "realisticdisasters.configuration.destruction": "Destruction & protection",
   "realisticdisasters.configuration.tornado": "Tornado",
+  "realisticdisasters.configuration.tsunami": "Tsunami / flood",
   "realisticdisasters.configuration.camera": "Camera",
   "realisticdisasters.configuration.visuals": "Visuals"
 }
