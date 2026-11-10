@@ -15,6 +15,8 @@ import net.minecraft.client.resources.sounds.SoundInstance;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.BlockParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.core.particles.SimpleParticleType;
+import com.realisticdisasters.client.EffectsManager;
 import net.minecraft.server.level.ParticleStatus;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
@@ -29,8 +31,8 @@ import net.minecraft.world.phys.Vec3;
  * swirling funnel, debris and dust rings at the base, and a layered roar.
  */
 public final class TornadoVisual implements DisasterVisual {
-    private static final int SKY = 0x4E5B47;     // bruised storm green
-    private static final int FOG = 0x56604F;
+    private static final int SKY = 0x56654C;     // bruised storm green
+    private static final int FOG = 0x7C876F;   // bright, sickly horizon band under the dark base
     private static final int CLOUDS = 0x33382F;
 
     private static final RandomSource RANDOM = RandomSource.create();
@@ -55,13 +57,34 @@ public final class TornadoVisual implements DisasterVisual {
         return Mth.clamp(d.data(TornadoDisaster.D_TOUCHDOWN), 0f, 1f);
     }
 
-    /** Funnel radius at a height fraction: narrow rope at the ground, flaring into the wall cloud. */
+    /**
+     * Funnel radius at a height fraction: a narrow rope at the ground that widens upward and flares into the
+     * wall cloud. Stronger tornadoes are wider ("wedge"); weakening ones thin out ("rope out").
+     */
     public static double funnelRadius(ClientDisaster d, float h) {
         float core = coreRadius(d);
-        float rope = 0.35f + 0.65f * d.strength();   // thins out as it weakens ("roping out")
-        double r = core * (0.45 * rope + 1.6 * Math.pow(Mth.clamp(h, 0f, 1.1f), 2.2));
-        if (h > 0.85f) r += core * (h - 0.85f) * 9.0;   // wall cloud shelf
+        float rope = 0.3f + 0.7f * d.strength();
+        float width = 0.7f + d.intensity * 0.08f;
+        double hc = Mth.clamp(h, 0f, 1f);
+        double r = core * width * (0.42 * rope + 1.15 * Math.pow(hc, 2.3));
+        if (hc > 0.8) r += core * (hc - 0.8) / 0.2 * 4.0;
         return r;
+    }
+
+    /**
+     * Horizontal offset of the funnel axis at a height fraction: the top trails behind the direction of travel and
+     * the column snakes slowly, so it never reads as a straight pillar.
+     */
+    public static Vec3 axisOffset(ClientDisaster d, float h) {
+        float core = coreRadius(d);
+        float hx = d.data(TornadoDisaster.D_HEADING_X), hz = d.data(TornadoDisaster.D_HEADING_Z);
+        double hc = Mth.clamp(h, 0f, 1f);
+        double t = (EffectsManager.ticks() + d.id * 977) * 0.035;
+        double tilt = core * 1.8 * Math.pow(hc, 1.3) * (0.4 + 0.6 * d.strength());
+        double belly = Math.sin(hc * Math.PI);
+        double sway = core * 0.6 * Math.sin(t + hc * 3.0) * belly;
+        double surge = core * 0.35 * Math.cos(t * 0.63 + hc * 4.7) * belly;
+        return new Vec3(-hx * (tilt + surge) - hz * sway, 0, -hz * (tilt + surge) + hx * sway);
     }
 
     // ------------------------------------------------------------------ atmosphere
@@ -79,8 +102,9 @@ public final class TornadoVisual implements DisasterVisual {
         out.clouds(CLOUDS, w);
         out.fogColor(FOG, w);
         out.darken(w * (0.25f + d.intensity * 0.06f));
-        float fogEnd = 40f + (5 - d.intensity) * 14f + (float) dist * 0.35f;
-        out.fog(fogEnd, w * (d.phase == Phase.WARNING ? 0.4f : 0.85f));
+        // Rain haze, not a wall: the funnel must stay visible from 100+ blocks.
+        float fogEnd = 110f + (5 - d.intensity) * 20f + (float) dist * 0.6f;
+        out.fog(fogEnd, w * (d.phase == Phase.WARNING ? 0.35f : 0.6f));
 
         float td = touchdown(d);
         float core = coreRadius(d);
@@ -126,35 +150,51 @@ public final class TornadoVisual implements DisasterVisual {
 
         float s = d.strength();
         float td = touchdown(d);
-        float budget = (14 + d.intensity * 10) * density * lod;
-        int id = d.id;
+        float budget = (22 + d.intensity * 14) * density * lod;
 
-        // Wall cloud: always present once the storm organises (warning phase onward).
-        int wallCount = count(budget * 0.35f * Math.max(0.3f, s));
+        // Wall cloud / mesocyclone base: present from the warning phase on, slowly turning.
+        int wallCount = count(budget * 0.2f * Math.max(0.35f, s));
         for (int i = 0; i < wallCount; i++) {
-            float h = 0.86f + RANDOM.nextFloat() * 0.14f;
-            spawn(level, ModRegistries.FUNNEL_CLOUD.get(), d, h, 0.6f + RANDOM.nextFloat() * 0.8f, height);
+            float ring = 1.2f + RANDOM.nextFloat() * 2.6f;           // lowered wall cloud around the funnel top
+            spawnAt(level, ModRegistries.WALL_CLOUD.get(), d, 0.9f, ring * core, ring, height);
+        }
+        // Storm deck: sparse, huge, slowly turning cloud base that covers the sky for ~150 blocks.
+        int deckCount = count((1.6f + d.intensity * 0.3f) * Math.max(0.3f, s) * Math.max(0.5f, density));
+        for (int i = 0; i < deckCount; i++) {
+            float ring = 4f + (float) Math.sqrt(RANDOM.nextFloat()) * 14f;
+            spawnAt(level, ModRegistries.WALL_CLOUD.get(), d, 0.97f, ring * core, ring, height);
         }
 
-        // Funnel body: lowers from the cloud base as the tornado touches down.
-        float bottom = (1f - td) * 0.8f;
+        // Condensation funnel lowering from the cloud base.
+        float bottom = (1f - td) * 0.85f;
         if (td > 0.02f || d.phase == Phase.BUILDUP) {
-            int funnelCount = count(budget * s);
+            int funnelCount = count(budget * 1.4f * s);
             for (int i = 0; i < funnelCount; i++) {
-                float h = bottom + RANDOM.nextFloat() * (0.9f - bottom);
-                spawn(level, ModRegistries.FUNNEL_CLOUD.get(), d, h, 0.75f + RANDOM.nextFloat() * 0.5f, height);
+                // bias toward the lower funnel, where it is thin and needs density to read as solid
+                float u = RANDOM.nextFloat();
+                float h = bottom + (u * u) * (0.9f - bottom);
+                float jitter = 0.78f + RANDOM.nextFloat() * 0.3f;
+                spawnAt(level, ModRegistries.FUNNEL_CLOUD.get(), d, h, funnelRadius(d, h) * jitter, jitter, height);
             }
         }
 
-        if (td > 0.4f && dist < 260) {
-            // Debris flecks and base dust ring.
-            int debrisCount = count(budget * 0.35f * td);
-            for (int i = 0; i < debrisCount; i++) {
-                spawn(level, ModRegistries.STORM_DEBRIS.get(), d, RANDOM.nextFloat() * 0.2f, 0.8f + RANDOM.nextFloat() * 0.6f, height);
-            }
-            int dustCount = count(budget * 0.25f * td);
+        if (td > 0.35f && dist < 300) {
+            // Debris cloud at the base, flecks whipped around it, dust streamers feeding in.
+            int dustCount = count(budget * 0.7f * td);
             for (int i = 0; i < dustCount; i++) {
-                spawn(level, ModRegistries.DUST_CLOUD.get(), d, RANDOM.nextFloat() * 0.3f, 0.9f + RANDOM.nextFloat() * 0.5f, height);
+                float jitter = RANDOM.nextFloat();
+                spawnAt(level, ModRegistries.DUST_CLOUD.get(), d, RANDOM.nextFloat() * 0.15f, core * (0.5 + 1.3 * jitter), jitter, height);
+            }
+            int debrisCount = count(budget * 0.3f * td);
+            for (int i = 0; i < debrisCount; i++) {
+                float jitter = 0.8f + RANDOM.nextFloat() * 0.6f;
+                float h = RANDOM.nextFloat() * 0.15f;
+                spawnAt(level, ModRegistries.STORM_DEBRIS.get(), d, h, funnelRadius(d, h) * jitter * 1.25, jitter, height);
+            }
+            int inflowCount = count(budget * 0.15f * td);
+            for (int i = 0; i < inflowCount; i++) {
+                float jitter = 3.5f + RANDOM.nextFloat() * 3f;
+                spawnAt(level, ModRegistries.DUST_INFLOW.get(), d, 0f, core * jitter, jitter, height);
             }
             // Real block chunks from the ground under the funnel (uses the actual terrain textures).
             if (dist < 128) {
@@ -180,14 +220,14 @@ public final class TornadoVisual implements DisasterVisual {
         return n;
     }
 
-    private static void spawn(ClientLevel level, net.minecraft.core.particles.SimpleParticleType type, ClientDisaster d,
-                              float heightFrac, float jitter, float height) {
-        Vec3 c = d.pos();
+    /** Spawns a vortex particle at height fraction {@code h}, radius {@code r} around the (tilted) axis. */
+    private static void spawnAt(ClientLevel level, SimpleParticleType type, ClientDisaster d, float h, double r,
+                                float jitter, float height) {
+        Vec3 c = d.pos().add(axisOffset(d, h));
         double a = RANDOM.nextDouble() * Math.PI * 2;
-        double r = funnelRadius(d, heightFrac) * jitter;
         // The particle reads its disaster id / height / jitter from the "velocity" args (see VortexParticle).
-        level.addParticle(type, true, true, c.x + Math.cos(a) * r, c.y + heightFrac * height, c.z + Math.sin(a) * r,
-                d.id, heightFrac, jitter);
+        level.addParticle(type, true, true, c.x + Math.cos(a) * r, c.y + h * height, c.z + Math.sin(a) * r,
+                d.id, h, jitter);
     }
 
     private void tickSounds(ClientDisaster d, State st, Vec3 cam) {

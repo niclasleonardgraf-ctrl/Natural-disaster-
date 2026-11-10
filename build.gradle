@@ -57,8 +57,8 @@ neoForge {
         // (see DisasterManager#devAutostart). Copy any world into run/saves/VisualTest first.
         clientVisualTest {
             client()
-            programArguments.addAll '--quickPlaySingleplayer', 'VisualTest'
-            systemProperty 'realisticdisasters.autostart', 'tornado,4,BUILDUP'
+            programArguments.addAll '--quickPlaySingleplayer', 'VisualTest', '--width', '1280', '--height', '720'
+            systemProperty 'realisticdisasters.autostart', 'tornado,4,PEAK'
             systemProperty 'realisticdisasters.debug', 'true'
         }
 

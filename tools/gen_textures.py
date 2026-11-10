@@ -15,7 +15,7 @@ PARTICLES = os.path.join(ROOT, "assets", "realisticdisasters", "textures", "part
 
 # Light -> dark ramps (4 steps, no gradients). Particles are tinted in code, so clouds stay near-neutral.
 CLOUD = [(236, 236, 232), (206, 207, 201), (172, 174, 168), (138, 140, 134)]
-DUST = [(240, 226, 196), (219, 200, 160), (191, 168, 124), (158, 135, 95)]
+DUST = [(232, 228, 220), (206, 201, 192), (176, 170, 160), (144, 138, 128)]  # neutral: tinted in code
 DEBRIS = [(118, 86, 54), (92, 66, 40), (86, 120, 52), (64, 92, 38), (128, 128, 128), (98, 98, 98)]
 
 

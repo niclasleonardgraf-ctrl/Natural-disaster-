@@ -4,41 +4,51 @@ import com.realisticdisasters.client.ClientDisaster;
 import com.realisticdisasters.client.ClientDisasters;
 import com.realisticdisasters.client.tornado.TornadoVisual;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.particle.Particle;
 import net.minecraft.client.particle.ParticleProvider;
 import net.minecraft.client.particle.SingleQuadParticle;
 import net.minecraft.client.particle.SpriteSet;
 import net.minecraft.core.particles.SimpleParticleType;
+import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * A particle that orbits a tornado's funnel. It looks up its disaster every tick, so the whole funnel follows the
- * tornado as it moves and ropes out when it weakens. Three flavours share the motion code:
- * cloud (funnel body + wall cloud), debris (fast flecks near the ground) and dust (base cloud).
- *
- * Spawn args: xAux = disaster id, yAux = start height fraction (0..1), zAux = radius jitter.
+ * A particle bound to a tornado. It looks its disaster up every tick, so the whole vortex follows the storm, tilts,
+ * snakes and ropes out with it. Roles:
+ * <ul>
+ *   <li>CLOUD: condensation funnel, sized to the local funnel radius, shaded by its side relative to the light</li>
+ *   <li>WALL: the broad, slowly rotating wall cloud / mesocyclone base</li>
+ *   <li>DEBRIS: dark flecks whipped around the base and flung out</li>
+ *   <li>DUST: the churning brown debris cloud at the base</li>
+ *   <li>INFLOW: dust streamers spiralling in along the ground</li>
+ * </ul>
+ * Spawn args: xAux = disaster id, yAux = start height fraction, zAux = radius jitter (+100 per variant step).
  */
 public class VortexParticle extends SingleQuadParticle {
-    public enum Kind { CLOUD, DEBRIS, DUST }
+    public enum Kind { CLOUD, WALL, DEBRIS, DUST, INFLOW }
+
+    /** Direction the "sun" lights the vortex from (radians, world space). */
+    private static final double LIGHT_ANGLE = Math.PI * 0.8;
 
     private final Kind kind;
-    private final SpriteSet sprites;
     private final int disasterId;
     private final float jitter;
-    private final float baseSize;
+    private final float sizeVar;
+    private final float baseR, baseG, baseB;
+    private final int minBlockLight;
     private double angle;
     private float heightFrac;
     private float rise;
     private float spin;
-    private float fling;
+    private float radial;      // extra radial offset (fling / inflow)
+    private float targetSize;
+    private final boolean translucent;
 
     protected VortexParticle(ClientLevel level, double x, double y, double z, Kind kind, int disasterId,
                              float heightFrac, float jitter, SpriteSet sprites) {
         super(level, x, y, z, sprites.first());
         this.kind = kind;
-        this.sprites = sprites;
         this.disasterId = disasterId;
         this.heightFrac = heightFrac;
         this.jitter = jitter;
@@ -49,36 +59,63 @@ public class VortexParticle extends SingleQuadParticle {
         setSprite(sprites.get(r));
         ClientDisaster d = ClientDisasters.get(disasterId);
         if (d != null) {
-            Vec3 c = d.pos();
+            Vec3 c = d.pos().add(TornadoVisual.axisOffset(d, heightFrac));
             angle = Math.atan2(z - c.z, x - c.x);
         }
+        this.sizeVar = 0.75f + r.nextFloat() * 0.5f;
+        float shade;
         switch (kind) {
             case CLOUD -> {
-                lifetime = 50 + r.nextInt(50);
-                rise = 0.004f + r.nextFloat() * 0.006f;
-                spin = 0.10f + r.nextFloat() * 0.06f;
-                baseSize = 1.4f + r.nextFloat() * 1.8f;
-                float shade = 0.36f + r.nextFloat() * 0.22f;
-                setColor(shade, shade * 1.02f, shade * 0.96f);
+                lifetime = 60 + r.nextInt(60);
+                rise = 0.0015f + r.nextFloat() * 0.003f;
+                spin = 0.12f + r.nextFloat() * 0.05f;
+                shade = 0.40f + r.nextFloat() * 0.14f;
+                baseR = shade; baseG = shade * 1.01f; baseB = shade * 1.04f;
+                minBlockLight = 6;
+                translucent = false;
+            }
+            case WALL -> {
+                lifetime = 160 + r.nextInt(120);
+                rise = 0f;
+                spin = jitter >= 4f ? 0.0025f + r.nextFloat() * 0.002f : 0.01f + r.nextFloat() * 0.008f;
+                shade = 0.17f + r.nextFloat() * 0.1f;
+                baseR = shade; baseG = shade * 1.03f; baseB = shade * 1.02f;
+                minBlockLight = 4;
+                translucent = false;
             }
             case DEBRIS -> {
                 lifetime = 30 + r.nextInt(40);
-                rise = 0.012f + r.nextFloat() * 0.014f;
-                spin = 0.22f + r.nextFloat() * 0.12f;
-                baseSize = 0.18f + r.nextFloat() * 0.22f;
-                float shade = 0.55f + r.nextFloat() * 0.35f;
-                setColor(shade, shade, shade);
+                rise = 0.008f + r.nextFloat() * 0.012f;
+                spin = 0.20f + r.nextFloat() * 0.10f;
+                shade = 0.45f + r.nextFloat() * 0.35f;
+                baseR = shade; baseG = shade; baseB = shade;
+                minBlockLight = 5;
+                translucent = false;
             }
-            default -> {
-                lifetime = 40 + r.nextInt(40);
-                rise = 0.001f + r.nextFloat() * 0.003f;
-                spin = 0.06f + r.nextFloat() * 0.05f;
-                baseSize = 1.2f + r.nextFloat() * 1.6f;
-                float shade = 0.75f + r.nextFloat() * 0.2f;
-                setColor(shade * 0.85f, shade * 0.74f, shade * 0.58f);
+            case DUST -> {
+                lifetime = 60 + r.nextInt(60);
+                rise = 0.004f + r.nextFloat() * 0.006f;
+                spin = 0.10f + r.nextFloat() * 0.06f;
+                shade = 0.38f + r.nextFloat() * 0.22f;
+                // dusty grey-brown, with some darker soil clumps
+                float soil = r.nextFloat() < 0.35f ? 0.75f : 1f;
+                baseR = shade * 0.80f * soil; baseG = shade * 0.73f * soil; baseB = shade * 0.64f * soil;
+                minBlockLight = 7;
+                translucent = true;
+            }
+            default -> { // INFLOW
+                lifetime = 60 + r.nextInt(40);
+                rise = 0f;
+                spin = 0.035f + r.nextFloat() * 0.03f;
+                shade = 0.6f + r.nextFloat() * 0.2f;
+                baseR = shade * 0.80f; baseG = shade * 0.74f; baseB = shade * 0.64f;
+                minBlockLight = 7;
+                translucent = true;
             }
         }
-        this.quadSize = baseSize;
+        setColor(baseR, baseG, baseB);
+        if (translucent) setAlpha(0.55f + r.nextFloat() * 0.35f);
+        this.quadSize = this.targetSize = 0.5f;
         this.roll = this.oRoll = r.nextFloat() * Mth.TWO_PI;
     }
 
@@ -94,7 +131,6 @@ public class VortexParticle extends SingleQuadParticle {
         }
         ClientDisaster d = ClientDisasters.get(disasterId);
         if (d == null) {
-            // Orphaned: drift and fade away.
             x += xd;
             y += yd + 0.02;
             z += zd;
@@ -102,35 +138,78 @@ public class VortexParticle extends SingleQuadParticle {
         }
         Vec3 c = d.pos();
         float height = TornadoVisual.height(d);
+        float core = TornadoVisual.coreRadius(d);
         float strength = d.strength();
-        heightFrac = Math.min(1.05f, heightFrac + rise);
-        // Inner funnel spins faster (conservation of angular momentum).
-        double speed = spin * (1.25 - 0.6 * heightFrac) * (0.4 + 0.6 * strength);
-        angle += speed;
-        double r = TornadoVisual.funnelRadius(d, heightFrac) * jitter;
+        heightFrac = Math.min(1.0f, heightFrac + rise);
+
+        double r;
         double ny;
+        float spinScale = 0.35f + 0.65f * strength;
         switch (kind) {
+            case CLOUD -> {
+                r = TornadoVisual.funnelRadius(d, heightFrac) * jitter;
+                ny = c.y + heightFrac * height;
+                targetSize = Mth.clamp((float) r * 0.62f, 0.6f, 4.4f) * sizeVar;
+                spinScale *= (float) (1.3 - 0.75 * heightFrac);   // tighter = faster
+            }
+            case WALL -> {
+                // Flat-bottomed: all wall-cloud and deck particles share one base height, only the tops vary.
+                r = core * jitter;
+                boolean deck = jitter >= 4f;
+                double base = c.y + height * (deck ? 0.97 : 0.9);
+                ny = base + (deck ? 3.5 : 2.0) * sizeVar;
+                targetSize = deck ? (7f + jitter * 0.5f) * sizeVar : (3.6f + jitter * 0.6f) * sizeVar;
+            }
             case DEBRIS -> {
-                r = r * 1.3 + fling;
-                if (heightFrac > 0.25f) fling += 0.12f;      // thrown outward once lifted
-                ny = c.y + heightFrac * height * 0.6;
+                if (heightFrac > 0.18f) radial += 0.18f;            // thrown out once lifted
+                r = TornadoVisual.funnelRadius(d, heightFrac) * jitter * 1.25 + radial;
+                ny = c.y + heightFrac * height * 0.55;
+                targetSize = 0.12f + 0.2f * sizeVar;
             }
             case DUST -> {
-                fling += 0.05f;
-                r = r * 1.6 + fling;
-                ny = c.y + 0.3 + heightFrac * 6;
+                // Wide skirt at the ground that is drawn inward as it rises into the funnel.
+                float lift = Mth.clamp(heightFrac / 0.15f, 0f, 1f);
+                radial += 0.03f * (1f - lift);
+                r = (core * (0.5 + 1.3 * jitter) + radial) * (1.0 - 0.6 * lift);
+                ny = c.y + 0.5 + heightFrac * Math.min(24, height * 0.28);
+                targetSize = (1.4f + age / (float) lifetime * 3.2f) * sizeVar;
             }
-            default -> ny = c.y + heightFrac * height;
+            default -> { // INFLOW: spiral in along the ground, then get swept up
+                radial -= 0.09f + 0.05f * strength;
+                r = Math.max(core * 0.6, core * jitter + radial);
+                if (r <= core * 0.6 + 0.01) heightFrac = Math.min(0.2f, heightFrac + 0.01f);
+                ny = c.y + 0.25 + heightFrac * height * 0.4;
+                targetSize = (0.5f + 0.4f * sizeVar);
+            }
         }
-        double nx = c.x + Math.cos(angle) * r;
-        double nz = c.z + Math.sin(angle) * r;
+        angle += spin * spinScale;
+        float h = kind == Kind.CLOUD || kind == Kind.WALL ? heightFrac : 0f;
+        Vec3 axis = TornadoVisual.axisOffset(d, h);
+        double nx = c.x + axis.x + Math.cos(angle) * r;
+        double nz = c.z + axis.z + Math.sin(angle) * r;
         xd = nx - x;
         yd = ny - y;
         zd = nz - z;
         x = nx;
         y = ny;
         z = nz;
-        roll += (float) speed * 0.5f;
+        quadSize += (targetSize - quadSize) * 0.15f;
+        roll += spin * spinScale * 0.4f;
+
+        // Side lighting gives the vortex volume: the lit flank is paler, the far flank in shadow.
+        float lit = (float) (0.5 + 0.5 * Math.cos(angle - LIGHT_ANGLE));
+        float shade = 0.68f + 0.32f * lit;
+        if (kind == Kind.CLOUD) {
+            // Helical striations: bands wound around the funnel make the rotation readable.
+            shade *= (float) (0.84 + 0.16 * Math.sin(angle * 2.0 - heightFrac * 34.0));
+        }
+        if (kind == Kind.CLOUD && heightFrac < 0.25f) {
+            // lower funnel picks up the brown of the debris it is ingesting
+            float m = (0.25f - heightFrac) / 0.25f * 0.45f;
+            setColor(Mth.lerp(m, baseR, 0.52f) * shade, Mth.lerp(m, baseG, 0.44f) * shade, Mth.lerp(m, baseB, 0.36f) * shade);
+        } else {
+            setColor(baseR * shade, baseG * shade, baseB * shade);
+        }
     }
 
     @Override
@@ -142,13 +221,14 @@ public class VortexParticle extends SingleQuadParticle {
     }
 
     @Override
-    protected Layer getLayer() {
-        return Layer.OPAQUE;
+    protected int getLightCoords(float a) {
+        int lc = super.getLightCoords(a);
+        return LightCoordsUtil.pack(Math.max(LightCoordsUtil.block(lc), minBlockLight), LightCoordsUtil.sky(lc));
     }
 
     @Override
-    public Particle scale(float scale) {
-        return super.scale(scale);
+    protected Layer getLayer() {
+        return translucent ? Layer.TRANSLUCENT : Layer.OPAQUE;
     }
 
     public static ParticleProvider<SimpleParticleType> provider(Kind kind, SpriteSet sprites) {
