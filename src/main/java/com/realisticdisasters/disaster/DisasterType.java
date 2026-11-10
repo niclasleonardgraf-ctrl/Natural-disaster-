@@ -8,6 +8,7 @@ import java.util.function.Supplier;
 
 import com.realisticdisasters.config.DisasterConfig;
 import com.realisticdisasters.disaster.tornado.TornadoDisaster;
+import com.realisticdisasters.disaster.volcano.VolcanoDisaster;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
 
@@ -16,7 +17,9 @@ import net.minecraft.world.phys.Vec3;
  */
 public enum DisasterType {
     TORNADO(TornadoDisaster::new, DisasterConfig.TORNADO_ENABLED::getAsBoolean,
-            DisasterConfig.TORNADO_WEIGHT::getAsInt, DisasterConfig.TORNADO_BIOMES::get);
+            DisasterConfig.TORNADO_WEIGHT::getAsInt, DisasterConfig.TORNADO_BIOMES::get),
+    VOLCANO(VolcanoDisaster::new, DisasterConfig.VOLCANO_ENABLED::getAsBoolean,
+            DisasterConfig.VOLCANO_WEIGHT::getAsInt, DisasterConfig.VOLCANO_BIOMES::get);
 
     public interface Factory {
         Disaster create(ServerLevel level, int id, Vec3 pos, int intensity);

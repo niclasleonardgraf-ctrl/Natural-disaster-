@@ -8,6 +8,7 @@ import com.realisticdisasters.disaster.Disaster;
 import com.realisticdisasters.disaster.DisasterManager;
 import com.realisticdisasters.disaster.DisasterType;
 import com.realisticdisasters.disaster.Phase;
+import com.realisticdisasters.disaster.volcano.VolcanoDisaster;
 import com.realisticdisasters.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -43,6 +44,12 @@ public final class DisasterGameTests {
 
     public static void register(IEventBus modBus) {
         FUNCTIONS.register(modBus);
+        FUNCTIONS.register("volcano_erupts", () -> DisasterGameTests::volcanoErupts);
+        FUNCTIONS.register("volcano_lava_cools", () -> DisasterGameTests::volcanoLavaCools);
+        FUNCTIONS.register("volcano_respects_block_toggle", () -> DisasterGameTests::volcanoRespectsBlockToggle);
+        FUNCTIONS.register("volcano_intensity3_tick_cost", () -> DisasterGameTests::volcanoTickCost);
+        FUNCTIONS.register("volcano_pyroclastic_flow", () -> DisasterGameTests::volcanoPyroclasticFlow);
+        FUNCTIONS.register("volcano_mountain_scales", () -> DisasterGameTests::volcanoMountainScales);
         modBus.addListener(DisasterGameTests::registerTests);
     }
 
@@ -53,6 +60,12 @@ public final class DisasterGameTests {
         add(event, "tornado_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_perf")), 400);
         add(event, "tornado_shelter_protects", event.registerEnvironment(ModRegistries.id("env_shelter")), 300);
         add(event, "tornado_breaks_glass_and_snaps_trees", event.registerEnvironment(ModRegistries.id("env_materials")), 400);
+        add(event, "volcano_erupts", event.registerEnvironment(ModRegistries.id("env_volcano_erupts")), 600);
+        add(event, "volcano_lava_cools", event.registerEnvironment(ModRegistries.id("env_volcano_cooling")), 900);
+        add(event, "volcano_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_volcano_toggle")), 400);
+        add(event, "volcano_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_volcano_perf")), 400);
+        add(event, "volcano_pyroclastic_flow", event.registerEnvironment(ModRegistries.id("env_volcano_pdc")), 400);
+        add(event, "volcano_mountain_scales", event.registerEnvironment(ModRegistries.id("env_volcano_scale")), 400);
     }
 
     private static void add(RegisterGameTestsEvent event, String name, Holder<TestEnvironmentDefinition<?>> env, int maxTicks) {
@@ -184,6 +197,164 @@ public final class DisasterGameTests {
             helper.assertTrue(!helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(14, 8, 17))).is(Blocks.OAK_LOG)
                     && logs <= 3, "trunk not snapped (" + logs + " logs left)");
             DisasterManager.stop(helper.getLevel(), tornado.id(), false);
+        });
+    }
+
+    // ------------------------------------------------------------------ volcano
+
+    private static VolcanoDisaster startPeakVolcano(GameTestHelper helper, int intensity) {
+        DisasterConfig.SPAWN_PROTECTION_RADIUS.set(0);
+        BlockPos center = helper.absolutePos(new BlockPos(16, 4, 16));
+        VolcanoDisaster d = (VolcanoDisaster) DisasterManager.start(helper.getLevel(), DisasterType.VOLCANO, Vec3.atBottomCenterOf(center), intensity);
+        d.confineForTest(18); // test arenas are only 37 blocks apart
+        d.skipTo(Phase.PEAK);
+        return d;
+    }
+
+    /** Blocks in the arena column range that the volcano produces (cone rock, lava, scorch). */
+    private static int volcanicBlocks(GameTestHelper helper, boolean cooledOnly) {
+        int n = 0;
+        for (int x = -8; x < 40; x++)
+            for (int y = 2; y < 14; y++)
+                for (int z = -8; z < 40; z++) {
+                    var st = helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(x, y, z)));
+                    if (st.is(Blocks.BASALT) || st.is(Blocks.BLACKSTONE)) n++;
+                    else if (!cooledOnly && (st.is(Blocks.MAGMA_BLOCK) || st.is(Blocks.TUFF) || st.is(Blocks.LAVA))) n++;
+                }
+        return n;
+    }
+
+    private static void volcanoErupts(GameTestHelper helper) {
+        // A cow standing right where the mountain will rise: the ground must lift it, not bury it.
+        net.minecraft.world.entity.animal.cow.Cow cow = helper.spawn(EntityType.COW, new BlockPos(24, 4, 16));
+        cow.setNoAi(true);
+        double cowStartY = cow.getY();
+        VolcanoDisaster volcano = startPeakVolcano(helper, 3);
+        helper.succeedWhen(() -> {
+            // (it may well die from heat or bombs - but it must ride up on the new ground, never end up buried in it)
+            helper.assertTrue(cow.getY() > cowStartY + 1.5, "cow was not lifted by the rising mountain (dy=" + (cow.getY() - cowStartY) + ")");
+            helper.assertTrue(!cow.isAlive() || !helper.getLevel().getBlockState(cow.blockPosition()).isSuffocating(helper.getLevel(), cow.blockPosition()),
+                    "cow is buried inside the mountain");
+            helper.assertTrue(DisasterManager.active(helper.getLevel()).contains(volcano), "volcano should be active");
+            helper.assertTrue(volcano.hasCone(), "flat arena should get a cone");
+            helper.assertTrue(volcano.coneBlocks() >= 30, "cone not built yet (" + volcano.coneBlocks() + ")");
+            helper.assertTrue(volcano.bombsLaunched() >= 4, "not enough lava bombs yet (" + volcano.bombsLaunched() + ")");
+            helper.assertTrue(volcano.blasts() >= 1, "no eruption blast yet");
+            helper.assertTrue(volcano.lavaPlaced() >= 3, "no lava flow yet (" + volcano.lavaPlaced() + ")");
+            int found = volcanicBlocks(helper, false);
+            helper.assertTrue(found >= 30, "too few volcanic blocks in the world (" + found + ")");
+            DisasterManager.stop(helper.getLevel(), volcano.id(), false);
+        });
+    }
+
+    private static void volcanoLavaCools(GameTestHelper helper) {
+        DisasterConfig.VOLCANO_COOLING_TICKS.set(60);
+        VolcanoDisaster volcano = startPeakVolcano(helper, 3);
+        helper.succeedWhen(() -> {
+            helper.assertTrue(volcano.lavaCooled() >= 4, "lava has not crusted over yet (" + volcano.lavaCooled() + "/" + volcano.lavaPlaced() + ")");
+            helper.assertTrue(volcano.rockFormed() >= 3, "crust has not turned into rock yet (" + volcano.rockFormed() + ")");
+            helper.assertTrue(volcanicBlocks(helper, true) >= 3, "no basalt / blackstone found");
+            DisasterConfig.VOLCANO_COOLING_TICKS.set(900);
+            DisasterManager.stop(helper.getLevel(), volcano.id(), false);
+        });
+    }
+
+    private static void volcanoRespectsBlockToggle(GameTestHelper helper) {
+        DisasterConfig.BLOCK_DESTRUCTION.set(false);
+        java.util.Map<BlockPos, net.minecraft.world.level.block.state.BlockState> before = new java.util.HashMap<>();
+        for (int x = 0; x < 32; x++)
+            for (int y = 3; y < 14; y++)
+                for (int z = 0; z < 32; z++) {
+                    BlockPos p = helper.absolutePos(new BlockPos(x, y, z));
+                    before.put(p, helper.getLevel().getBlockState(p));
+                }
+        VolcanoDisaster volcano = startPeakVolcano(helper, 5);
+        helper.runAfterDelay(300, () -> {
+            int count = 0;
+            StringBuilder changed = new StringBuilder();
+            for (var e : before.entrySet()) {
+                var now = helper.getLevel().getBlockState(e.getKey());
+                if (now != e.getValue()) {
+                    count++;
+                    if (count <= 5) changed.append(helper.relativePos(e.getKey()).toShortString()).append(' ')
+                            .append(e.getValue().getBlock().getDescriptionId()).append("->").append(now.getBlock().getDescriptionId()).append("; ");
+                }
+            }
+            int bombs = volcano.bombsLaunched();
+            DisasterConfig.BLOCK_DESTRUCTION.set(true);
+            DisasterManager.stop(helper.getLevel(), volcano.id(), false);
+            helper.assertTrue(bombs > 0, "the volcano should still erupt (bombs) with destruction disabled");
+            helper.assertTrue(count == 0, "blocks changed although destruction is disabled: " + count + " " + changed);
+            helper.succeed();
+        });
+    }
+
+    private static void volcanoTickCost(GameTestHelper helper) {
+        VolcanoDisaster volcano = startPeakVolcano(helper, 3);
+        for (int i = 0; i < 6; i++) helper.spawn(EntityType.COW, new BlockPos(2 + i * 5, 4, 3));
+        helper.runAfterDelay(300, () -> {
+            double cost = DisasterManager.averageTickCostMs(helper.getLevel());
+            DisasterManager.stop(helper.getLevel(), volcano.id(), false);
+            RealisticDisasters.LOGGER.info("Volcano intensity 3 average server cost: {} ms/tick (bombs {}, lava {}, cone {}, lightning {})",
+                    String.format("%.3f", cost), volcano.bombsLaunched(), volcano.lavaPlaced(), volcano.coneBlocks(), volcano.lightningStrikes());
+            helper.assertTrue(cost < 2.0, "volcano too expensive: " + cost + " ms/tick");
+            helper.succeed();
+        });
+    }
+
+    /** A pyroclastic flow races down the mountain, burns what it catches and leaves an ash deposit. */
+    private static void volcanoPyroclasticFlow(GameTestHelper helper) {
+        java.util.List<Pig> pigs = new java.util.ArrayList<>();
+        for (int k = 0; k < 8; k++) {
+            double a = k * Math.PI / 4;
+            Pig pig = helper.spawn(EntityType.PIG, new BlockPos(16 + (int) Math.round(Math.cos(a) * 13), 4, 16 + (int) Math.round(Math.sin(a) * 13)));
+            pig.setNoAi(true);
+            pigs.add(pig);
+        }
+        VolcanoDisaster volcano = startPeakVolcano(helper, 4);
+        helper.runAfterDelay(5, volcano::triggerPyroclasticFlow);
+        helper.succeedWhen(() -> {
+            helper.assertTrue(volcano.pyroclasticFlows() >= 1, "no pyroclastic flow started");
+            long hurt = pigs.stream().filter(p -> !p.isAlive() || p.getHealth() < p.getMaxHealth()).count();
+            helper.assertTrue(hurt >= 1, "the flow didn't hit any of the animals around the vent");
+            int ash = 0;
+            for (int x = -16; x < 48; x++)
+                for (int y = 3; y < 40; y++)
+                    for (int z = -16; z < 48; z++)
+                        if (helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(x, y, z))).is(ModRegistries.VOLCANIC_ASH.get())) ash++;
+            helper.assertTrue(ash >= 3, "no ash deposit left behind (" + ash + ")");
+            RealisticDisasters.LOGGER.info("Pyroclastic flow: {} of 8 animals hit, {} ash layers", hurt, ash);
+            DisasterManager.stop(helper.getLevel(), volcano.id(), false);
+        });
+    }
+
+    /** Volcano size scales with intensity up to a mountain the size of the largest vanilla peaks. */
+    private static void volcanoMountainScales(GameTestHelper helper) {
+        int last = 0;
+        for (int i = 1; i <= 5; i++) {
+            int h = VolcanoDisaster.plannedHeight(i);
+            helper.assertTrue(h > last, "mountain height must grow with intensity");
+            last = h;
+        }
+        helper.assertTrue(VolcanoDisaster.plannedHeight(5) >= 120, "intensity 5 should be mountain-sized");
+        helper.assertTrue(VolcanoDisaster.plannedRadius(5) >= 180, "intensity 5 should have a mountain-sized base");
+        // Grow a real intensity-4 mountain for a while and check its shape: summit over the vent, flanks lower.
+        VolcanoDisaster volcano = startPeakVolcano(helper, 4);
+        long start = System.nanoTime();
+        helper.runAfterDelay(300, () -> {
+            var level = helper.getLevel();
+            BlockPos vent = volcano.ventPos();
+            int summit = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, vent.getX() + 3, vent.getZ());
+            int flank = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, vent.getX() + 14, vent.getZ());
+            int base = helper.absolutePos(new BlockPos(0, 4, 0)).getY();
+            RealisticDisasters.LOGGER.info("Volcano i4 (confined) after 300 ticks: growth {}, {} blocks placed, summit +{}, flank(14) +{}, planned {}x{}",
+                    String.format("%.2f", volcano.growth()), volcano.coneBlocks(), summit - base, flank - base,
+                    volcano.mountainHeight(), volcano.mountainRadius());
+            DisasterManager.stop(level, volcano.id(), false);
+            helper.assertTrue(volcano.coneBlocks() > 1000, "mountain is not growing (" + volcano.coneBlocks() + " blocks)");
+            helper.assertTrue(summit - base >= 8, "summit too low (" + (summit - base) + ")");
+            helper.assertTrue(summit > flank, "flanks should be lower than the summit");
+            helper.succeed();
         });
     }
 

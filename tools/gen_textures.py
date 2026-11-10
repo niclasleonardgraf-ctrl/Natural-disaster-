@@ -236,6 +236,82 @@ def rain_shaft(seed, size=64):
     return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
 
 
+def ash_cloud(seed, size=128):
+    """Volcanic ash billow: dense, cauliflower-like puff with a soft, lumpy rim and a dark, shadowed underside.
+    128 px because these puffs are drawn up to ~40 blocks wide."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    n = fbm(size, rng, octaves=6, base=4)
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    r = np.sqrt(x * x + y * y) + (n - 0.5) * 0.55     # lumpy, cauliflower outline
+    t = np.clip((0.95 - r) / 0.3, 0, 1)               # soft but defined rim, so individual billows read
+    a = t * t * (3 - 2 * t) * np.clip(0.8 + 0.5 * n, 0, 1)
+    # strong top/bottom contrast: sunlit crown, dark shadowed base (the colour itself is tinted in code)
+    top = np.clip(-y * 0.5 + 0.5 - (r - 0.4) * 0.35, 0, 1)
+    light = np.clip(0.32 + 0.62 * top + 0.3 * (n - 0.5), 0, 1)
+    rgb = (light * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (np.clip(a, 0, 1) * 255).astype("uint8")]), "RGBA")
+
+
+def ash_flake(seed, size=16):
+    """Falling ash flake: a small, soft, slightly irregular grey speck."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    n = fbm(size, rng, octaves=3, base=2)
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    r = np.sqrt((x * (1 + 0.4 * n)) ** 2 + (y * (1.3 - 0.4 * n)) ** 2)
+    t = np.clip((0.75 - r) / 0.45, 0, 1)
+    a = t * t * (3 - 2 * t)
+    light = np.clip(0.72 + 0.2 * (n - 0.5), 0, 1)
+    rgb = (light * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
+
+
+def ash_shaft(seed, size=64):
+    """Ash fall-out curtain: soft, slightly slanted vertical streaks hanging from the cloud, fading at the ends."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    cols = fbm(size, rng, octaves=3, base=6)[0]
+    streak = np.tile(np.clip((cols - 0.3) * 2.0, 0, 1), (size, 1))
+    y = np.linspace(-1, 1, size)[:, None]
+    x = np.linspace(-1, 1, size)[None, :]
+    fade = np.clip(1 - np.abs(y + 0.15) ** 2.5, 0, 1) * np.clip(1 - np.abs(x) ** 2, 0, 1)
+    detail = fbm(size, rng, octaves=4, base=3) * 0.7 + 0.3
+    a = np.clip(streak * fade * detail * 1.2, 0, 1)
+    rgb = np.full((size, size), 190, dtype="uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
+
+
+def lava_spark(seed, size=16):
+    """Incandescent clot: white-hot core with a soft glow falloff (coloured by temperature in code)."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    n = fbm(size, rng, octaves=2, base=2)
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    r = np.sqrt(x * x + y * y) * (0.9 + 0.25 * n)
+    core = np.clip(1 - r / 0.45, 0, 1)
+    halo = np.clip(1 - r, 0, 1) ** 2
+    a = np.clip(core * 1.5 + halo * 0.7, 0, 1)
+    light = np.clip(0.75 + 0.25 * core, 0, 1)
+    rgb = (light * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
+
+
+def volcanic_ash_block(seed=1000, size=16):
+    """16x16 block texture in the vanilla style: fine, speckled grey ash with a few darker scoria grains."""
+    rng = random.Random(seed)
+    img = Image.new("RGBA", (size, size))
+    ramp = [(132, 128, 124), (122, 118, 114), (112, 109, 106), (101, 98, 96), (90, 88, 86)]
+    for y in range(size):
+        for x in range(size):
+            v = rng.random()
+            idx = 0 if v < 0.18 else 1 if v < 0.5 else 2 if v < 0.82 else 3 if v < 0.95 else 4
+            img.putpixel((x, y), ramp[idx] + (255,))
+    for _ in range(6):  # dark scoria grains
+        img.putpixel((rng.randrange(size), rng.randrange(size)), (64, 60, 58, 255))
+    return img
+
+
 # ----------------------------------------------------------------------------- 3D funnel mesh textures
 # Seamlessly tileable in both directions (they scroll around and up the funnel), smooth (blur filtering).
 
@@ -330,6 +406,16 @@ def main():
         write(soft_cloud(200 + i, density=0.85, wispy=True), f"dust_cloud_{i}")
         write(rain_shaft(400 + i), f"rain_shaft_{i}")
         write(debris_texture(300 + i), f"storm_debris_{i}")
+        write(ash_cloud(600 + i), f"ash_cloud_{i}")
+    for i in range(3):
+        write(ash_flake(700 + i), f"ash_fall_{i}")
+    for i in range(4):
+        write(ash_shaft(800 + i), f"ash_shaft_{i}")
+    for i in range(3):
+        write(lava_spark(900 + i), f"lava_spark_{i}")
+    blocks = os.path.join(ROOT, "assets", "realisticdisasters", "textures", "block")
+    os.makedirs(blocks, exist_ok=True)
+    volcanic_ash_block().save(os.path.join(blocks, "volcanic_ash.png"))
 
     # 3D funnel mesh
     write_entity_texture(funnel_core_texture(1000), "funnel_core")

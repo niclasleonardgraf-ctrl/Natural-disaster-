@@ -243,6 +243,53 @@ def gust(rng, seconds=3.0):
     return normalize(x * env, 0.75)
 
 
+def volcano_rumble(rng, seconds=9.0):
+    """Close volcano layer: deep roar of the vent with lava gurgles and rock crackle."""
+    n = int(seconds * RATE)
+    roar = fast_lowpass(rng.standard_normal(n), 160) * 1.8
+    body = bandpass(rng.standard_normal(n), 120, 600) * 0.4 * (0.5 + 0.5 * smooth_noise(n, 1.5, rng))
+    # gurgles: short low-pitched bubbles at random times
+    gurgle = np.zeros(n)
+    t = np.arange(int(0.25 * RATE)) / RATE
+    for _ in range(int(seconds * 3)):
+        start = rng.integers(0, n - len(t))
+        f = rng.uniform(40, 90)
+        gurgle[start:start + len(t)] += np.sin(2 * np.pi * f * t * (1 + t * 2)) * np.exp(-t * 14) * rng.uniform(0.3, 0.8)
+    crackle = bandpass(rng.standard_normal(n), 1500, 4500) * (rng.random(n) < 0.002) * 3.0
+    surge = 0.6 + 0.4 * smooth_noise(n, 0.6, rng)
+    x = (roar + body + gurgle * 0.6 + crackle * 0.15) * surge
+    return normalize(loopable(x))
+
+
+def volcano_distant(rng, seconds=10.0):
+    """Far volcano layer: very deep, pulsing sub-rumble."""
+    n = int(seconds * RATE)
+    brown = np.cumsum(rng.standard_normal(n))
+    brown -= fast_lowpass(brown, 6)
+    x = fast_lowpass(brown, 70)
+    x *= 0.55 + 0.45 * smooth_noise(n, 0.9, rng)
+    return normalize(loopable(x), 0.9)
+
+
+def volcano_blast(rng, seconds=5.0):
+    """Eruption blast: sharp broadband crack, then a long low boom and rolling tail."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, seconds, n)
+    crack = bandpass(rng.standard_normal(n), 200, 6000) * np.exp(-t * 18)
+    boom = fast_lowpass(rng.standard_normal(n), 90) * 3.0 * np.minimum(t / 0.02, 1) * np.exp(-t * 1.4)
+    roll = fast_lowpass(rng.standard_normal(n), 250) * np.exp(-t * 0.9) * (0.4 + 0.6 * smooth_noise(n, 3, rng)) * 0.8
+    return normalize(crack * 0.7 + boom + roll, 0.95)
+
+
+def bomb_impact(rng, seconds=1.6):
+    """Lava bomb landing: heavy thud plus a hiss of steam."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, seconds, n)
+    thud = fast_lowpass(rng.standard_normal(n), 150) * 2.5 * np.exp(-t * 9)
+    hiss = bandpass(rng.standard_normal(n), 2500, 9000) * np.minimum(t / 0.05, 1) * np.exp(-t * 2.5) * 0.35
+    return normalize(thud + hiss, 0.9)
+
+
 def main():
     rng = np.random.default_rng(1234)
     write_ogg("tornado_distant", tornado_distant(rng))
@@ -255,6 +302,14 @@ def main():
         write_ogg(f"debris_thud{i}", debris_thud(rng))
         write_ogg(f"wood_snap{i}", wood_snap(rng))
         write_ogg(f"debris_rattle{i}", debris_rattle(rng))
+
+    vrng = np.random.default_rng(4321)  # separate stream so the tornado sounds stay byte-identical
+    write_ogg("volcano_rumble", volcano_rumble(vrng))
+    write_ogg("volcano_distant", volcano_distant(vrng))
+    for i in range(1, 4):
+        write_ogg(f"volcano_blast{i}", volcano_blast(vrng))
+    for i in range(1, 3):
+        write_ogg(f"bomb_impact{i}", bomb_impact(vrng))
 
 
 if __name__ == "__main__":

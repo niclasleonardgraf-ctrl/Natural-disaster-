@@ -2,6 +2,11 @@
   "disaster.realisticdisasters.tornado": "Tornado",
   "disaster.realisticdisasters.tornado.warning": "The sky turns a sickly green... a storm is organising nearby.",
   "disaster.realisticdisasters.tornado.touchdown": "A funnel is reaching for the ground! Take shelter!",
+  "disaster.realisticdisasters.volcano": "Volcano",
+  "disaster.realisticdisasters.volcano.warning": "The ground trembles and the air smells of sulphur... magma is rising nearby.",
+  "disaster.realisticdisasters.volcano.onset": "The volcano is erupting! Get clear of the vent and the lava!",
+  "disaster.realisticdisasters.volcano.pyroclastic": "Pyroclastic flow! A glowing avalanche of ash is racing down the mountain - run!",
+  "block.realisticdisasters.volcanic_ash": "Volcanic Ash",
 
   "phase.realisticdisasters.warning": "Warning",
   "phase.realisticdisasters.buildup": "Buildup",
@@ -19,6 +24,8 @@
 
   "death.attack.realisticdisasters.tornado": "%1$s was swept away by a tornado",
   "death.attack.realisticdisasters.tornado.player": "%1$s was swept away by a tornado while fighting %2$s",
+  "death.attack.realisticdisasters.volcano": "%1$s was buried in volcanic fire",
+  "death.attack.realisticdisasters.volcano.player": "%1$s was buried in volcanic fire while fighting %2$s",
 
   "subtitles.realisticdisasters.tornado.roar": "Tornado roars",
   "subtitles.realisticdisasters.tornado.distant": "Distant rumbling wind",
@@ -29,6 +36,11 @@
   "subtitles.realisticdisasters.debris_thud": "Debris crashes",
   "subtitles.realisticdisasters.wood_snap": "Tree snaps",
   "subtitles.realisticdisasters.debris_rattle": "Debris rattles",
+  "subtitles.realisticdisasters.volcano.rumble": "Volcano roars",
+  "subtitles.realisticdisasters.volcano.distant": "Deep volcanic rumble",
+  "subtitles.realisticdisasters.volcano.blast": "Eruption blast",
+  "subtitles.realisticdisasters.volcano.bomb_impact": "Lava bomb lands",
+  "entity.realisticdisasters.lava_bomb": "Lava Bomb",
 
   "realisticdisasters.configuration.title": "Realistic Natural Disasters",
   "realisticdisasters.configuration.section.realisticdisasters.common.toml": "Disasters (server)",
@@ -38,6 +50,7 @@
   "realisticdisasters.configuration.general": "General",
   "realisticdisasters.configuration.destruction": "Destruction & protection",
   "realisticdisasters.configuration.tornado": "Tornado",
+  "realisticdisasters.configuration.volcano": "Volcano",
   "realisticdisasters.configuration.camera": "Camera",
   "realisticdisasters.configuration.visuals": "Visuals"
 }
