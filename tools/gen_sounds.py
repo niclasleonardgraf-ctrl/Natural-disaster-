@@ -490,6 +490,72 @@ def bomb_impact(rng, seconds=1.6):
     thud = fast_lowpass(rng.standard_normal(n), 150) * 2.5 * np.exp(-t * 9)
     hiss = bandpass(rng.standard_normal(n), 2500, 9000) * np.minimum(t / 0.05, 1) * np.exp(-t * 2.5) * 0.35
     return normalize(thud + hiss, 0.9)
+def crackle(n, rng, rate, decay=None):
+    """Sparse clicks (burning / falling debris), optionally thinning out over time."""
+    x = np.zeros(n)
+    t = np.linspace(0, 1, n)
+    p = rate / RATE * (np.exp(-t * decay) if decay else np.ones(n))
+    hits = rng.random(n) < p
+    x[hits] = rng.standard_normal(hits.sum())
+    return bandpass(np.convolve(x, np.exp(-np.arange(200) / 30.0), mode="same"), 800, 6000)
+
+
+def meteor_whoosh(rng, seconds=3.4):
+    """Close layer: a rushing, rising roar that sweeps up in pitch as the fireball closes in, with fire crackle."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, 1, n)
+    white = rng.standard_normal(n)
+    low = bandpass(white, 120, 700)
+    high = bandpass(rng.standard_normal(n), 900, 4200)
+    sweep = t ** 1.6                      # crossfade low rush -> bright hiss
+    x = low * (1 - sweep) * 1.4 + high * sweep * 0.8
+    x += fast_lowpass(rng.standard_normal(n), 90) * 1.2 * t   # rumble builds underneath
+    x += crackle(n, rng, 60) * 0.25
+    env = np.minimum(t / 0.5, 1) ** 2 * (0.35 + 0.65 * t ** 1.5)
+    return normalize(x * env)
+
+
+def meteor_whoosh_distant(rng, seconds=3.6):
+    """Far layer: soft, airy rush that swells and fades (no highs, they don't carry)."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, 1, n)
+    x = bandpass(rng.standard_normal(n), 80, 650) + fast_lowpass(rng.standard_normal(n), 120) * 0.6
+    env = np.sin(np.pi * np.minimum(t * 1.15, 1)) ** 1.5 * (0.75 + 0.25 * smooth_noise(n, 2, rng))
+    return normalize(x * env, 0.75)
+
+
+def meteor_impact(rng, seconds=4.0):
+    """Close impact: hard crack, a deep falling boom, then a tail of rumble and pattering debris."""
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    crack = rng.standard_normal(n) * np.exp(-t / 0.018)
+    freq = 34 + 46 * np.exp(-t / 0.35)    # 80 Hz falling to ~34 Hz
+    boom = np.sin(2 * np.pi * np.cumsum(freq) / RATE) * np.exp(-t / 0.9)
+    body = fast_lowpass(rng.standard_normal(n), 220) * np.exp(-t / 0.6) * 3
+    tail = fast_lowpass(rng.standard_normal(n), 120) * np.exp(-t / 1.6) * (0.6 + 0.4 * smooth_noise(n, 3, rng)) * 2
+    debris = crackle(n, rng, 120, decay=2.5) * np.minimum(t / 0.3, 1) * 0.5
+    x = crack * 0.9 + boom * 1.2 + body + tail + debris
+    return normalize(x, 0.95)
+
+
+def meteor_impact_distant(rng, seconds=5.5):
+    """Far impact: muffled thump with a long rolling echo, like distant artillery."""
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    freq = 30 + 25 * np.exp(-t / 0.4)
+    boom = np.sin(2 * np.pi * np.cumsum(freq) / RATE) * np.exp(-t / 1.0)
+    roll = fast_lowpass(rng.standard_normal(n), 140) * np.exp(-t / 1.8) * (0.5 + 0.5 * smooth_noise(n, 2.5, rng)) * 3
+    env = np.minimum(t / 0.03, 1)
+    return normalize((boom + roll) * env, 0.9)
+
+
+def meteor(rng=None):
+    rng = rng or np.random.default_rng(4321)
+    for i in range(1, 3):
+        write_ogg(f"meteor_whoosh{i}", meteor_whoosh(rng))
+        write_ogg(f"meteor_whoosh_distant{i}", meteor_whoosh_distant(rng))
+        write_ogg(f"meteor_impact{i}", meteor_impact(rng))
+        write_ogg(f"meteor_impact_distant{i}", meteor_impact_distant(rng))
 
 
 def main():
@@ -527,6 +593,7 @@ def write_wildfire():
         write_ogg(f"volcano_blast{i}", volcano_blast(vrng))
     for i in range(1, 3):
         write_ogg(f"bomb_impact{i}", bomb_impact(vrng))
+    meteor()
 
 
 if __name__ == "__main__":

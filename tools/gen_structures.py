@@ -167,6 +167,20 @@ def wildfire_arena(name="wildfire_arena", sx=32, sz=32, trees=((8, 8), (24, 10),
             for z in range(sz):
                 blocks.setdefault((x, y, z), "minecraft:air")
     write_structure(name, (sx, sy, sz), blocks)
+def meteor_arena():
+    """Deeper than the tornado arena so a crater (and its core) fits inside the structure."""
+    sx, sy, sz = 32, 18, 32
+    blocks = {}
+    for x in range(sx):
+        for z in range(sz):
+            for y in range(0, 9):
+                blocks[(x, y, z)] = "minecraft:stone"
+            blocks[(x, 9, z)] = "minecraft:dirt"
+            blocks[(x, 10, z)] = "minecraft:dirt"
+            blocks[(x, 11, z)] = "minecraft:grass_block"
+            for y in range(12, sy):
+                blocks[(x, y, z)] = "minecraft:air"
+    write_structure("meteor_arena", (sx, sy, sz), blocks)
 
 
 if __name__ == "__main__":
@@ -175,3 +189,4 @@ if __name__ == "__main__":
     wildfire_arena()
     # bigger field for the wildfire performance test, so an intensity-3 fire has room to build a real front
     wildfire_arena("wildfire_field", 48, 48, [(x, z) for x in range(8, 46, 13) for z in range(9, 46, 14)])
+    meteor_arena()

@@ -74,5 +74,15 @@
   "subtitles.realisticdisasters.volcano.blast": "Eruption blast",
   "subtitles.realisticdisasters.volcano.bomb_impact": "Lava bomb lands",
   "entity.realisticdisasters.lava_bomb": "Lava Bomb",
-  "realisticdisasters.configuration.volcano": "Volcano"
+  "realisticdisasters.configuration.volcano": "Volcano",
+  "disaster.realisticdisasters.meteor_shower": "Meteor Shower",
+  "disaster.realisticdisasters.meteor_shower.warning": "Shooting stars are streaking across the sky... more than usual.",
+  "disaster.realisticdisasters.meteor_shower.impacts": "Fireballs are reaching the ground! Take cover!",
+  "death.attack.realisticdisasters.meteor": "%1$s was struck by a meteor",
+  "death.attack.realisticdisasters.meteor.player": "%1$s was struck by a meteor while fighting %2$s",
+  "subtitles.realisticdisasters.meteor.whoosh": "Meteor roars past",
+  "subtitles.realisticdisasters.meteor.whoosh_distant": "Distant meteor whooshes",
+  "subtitles.realisticdisasters.meteor.impact": "Meteor impacts",
+  "subtitles.realisticdisasters.meteor.impact_distant": "Distant meteor impact",
+  "realisticdisasters.configuration.meteor_shower": "Meteor shower"
 }

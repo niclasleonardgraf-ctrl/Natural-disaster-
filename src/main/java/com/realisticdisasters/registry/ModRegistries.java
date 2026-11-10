@@ -64,6 +64,10 @@ public final class ModRegistries {
     public static final DeferredHolder<SoundEvent, SoundEvent> VOLCANO_DISTANT = sound("disaster.volcano.distant");
     public static final DeferredHolder<SoundEvent, SoundEvent> VOLCANO_BLAST = sound("disaster.volcano.blast");
     public static final DeferredHolder<SoundEvent, SoundEvent> LAVA_BOMB_IMPACT = sound("disaster.volcano.bomb_impact");
+    public static final DeferredHolder<SoundEvent, SoundEvent> METEOR_WHOOSH = sound("disaster.meteor.whoosh");
+    public static final DeferredHolder<SoundEvent, SoundEvent> METEOR_WHOOSH_DISTANT = sound("disaster.meteor.whoosh_distant");
+    public static final DeferredHolder<SoundEvent, SoundEvent> METEOR_IMPACT = sound("disaster.meteor.impact");
+    public static final DeferredHolder<SoundEvent, SoundEvent> METEOR_IMPACT_DISTANT = sound("disaster.meteor.impact_distant");
 
     // Particles
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FUNNEL_CLOUD =
@@ -151,6 +155,14 @@ public final class ModRegistries {
     public static final DeferredHolder<EntityType<?>, EntityType<LavaBombEntity>> LAVA_BOMB =
             ENTITY_TYPES.registerEntityType("lava_bomb", LavaBombEntity::new, MobCategory.MISC,
                     b -> b.sized(0.6f, 0.6f).clientTrackingRange(10).updateInterval(2).fireImmune().noSave().noLootTable());
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> METEOR_STREAK =
+            PARTICLES.register("meteor_streak", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> METEOR_FIREBALL =
+            PARTICLES.register("meteor_fireball", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> METEOR_EMBER =
+            PARTICLES.register("meteor_ember", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> METEOR_SMOKE =
+            PARTICLES.register("meteor_smoke", () -> new SimpleParticleType(true));
 
     // Data-driven damage type (data/realisticdisasters/damage_type/tornado.json)
     public static final ResourceKey<DamageType> TORNADO_DAMAGE =
@@ -161,6 +173,8 @@ public final class ModRegistries {
             ResourceKey.create(Registries.DAMAGE_TYPE, id("wildfire"));
     public static final ResourceKey<DamageType> VOLCANO_DAMAGE =
             ResourceKey.create(Registries.DAMAGE_TYPE, id("volcano"));
+    public static final ResourceKey<DamageType> METEOR_DAMAGE =
+            ResourceKey.create(Registries.DAMAGE_TYPE, id("meteor"));
 
     private static DeferredHolder<SoundEvent, SoundEvent> sound(String name) {
         return SOUNDS.register(name, () -> SoundEvent.createVariableRangeEvent(id(name)));

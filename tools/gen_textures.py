@@ -674,6 +674,82 @@ def write_wildfire():
     write_flame_block("wildfire_flame_1", 1601)
 
 
+# Meteor textures: soft 64x64 alpha gradients (white, tinted per particle in code). Light and smoke are soft in
+# reality; smoke sprites fade to zero well inside the quad so even 15-block puffs never show straight edges.
+
+
+def soft_glow(size, sigma, core=0.0):
+    """Gaussian glow: alpha falls off smoothly; optional flat white-hot core radius (fraction of size)."""
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    c = size / 2
+    for y in range(size):
+        for x in range(size):
+            d = math.hypot(x + 0.5 - c, y + 0.5 - c) / c
+            a = math.exp(-(d / sigma) ** 2)
+            if d < core:
+                a = 1.0
+            if d >= 1.0:
+                a = 0.0
+            a = max(0.0, min(1.0, a * 1.05))
+            img.putpixel((x, y), (255, 255, 255, int(a * 255)))
+    return img
+
+
+def fireball_texture(seed, size=64):
+    rng = random.Random(seed)
+    img = soft_glow(size, 0.42 + rng.uniform(-0.03, 0.03), core=0.18)
+    return img
+
+
+def streak_texture(seed, size=64):
+    rng = random.Random(seed)
+    return soft_glow(size, 0.36 + seed % 4 * 0.03)
+
+
+def ember_texture(seed, size=32):
+    return soft_glow(size, 0.45 + seed % 2 * 0.1, core=0.15)
+
+
+def value_noise(size, cells, rng):
+    grid = [[rng.random() for _ in range(cells + 1)] for _ in range(cells + 1)]
+    out = [[0.0] * size for _ in range(size)]
+    for y in range(size):
+        for x in range(size):
+            gx, gy = x / size * cells, y / size * cells
+            ix, iy = int(gx), int(gy)
+            fx, fy = gx - ix, gy - iy
+            fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+            a = grid[iy][ix] * (1 - fx) + grid[iy][ix + 1] * fx
+            b = grid[iy + 1][ix] * (1 - fx) + grid[iy + 1][ix + 1] * fx
+            out[y][x] = a * (1 - fy) + b * fy
+    return out
+
+
+def smoke_texture(seed, size=64):
+    """Soft billowy puff: a few overlapping lobes, low-frequency noise, light from above."""
+    rng = random.Random(seed)
+    lobes = [(rng.uniform(0.38, 0.62) * size, rng.uniform(0.4, 0.62) * size, rng.uniform(0.2, 0.3) * size) for _ in range(4)]
+    n1 = value_noise(size, 4, rng)
+    n2 = value_noise(size, 8, rng)
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    for y in range(size):
+        for x in range(size):
+            dens = 0.0
+            for cx, cy, r in lobes:
+                d = math.hypot(x + 0.5 - cx, y + 0.5 - cy) / r
+                dens = max(dens, 1 - d * d)
+            if dens <= 0:
+                continue
+            dens = dens * (0.6 + 0.4 * n1[y][x]) * (0.85 + 0.3 * n2[y][x])
+            a = max(0.0, min(1.0, dens ** 1.6 * 1.4))
+            # Radial window: alpha reaches exactly 0 well inside the quad, so huge puffs never show straight edges.
+            rr = math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2) / (size / 2)
+            a *= max(0.0, min(1.0, (0.92 - rr) / 0.35))
+            shade = int(255 * (0.82 + 0.18 * (1 - y / size)) * (0.9 + 0.1 * n2[y][x]))
+            img.putpixel((x, y), (shade, shade, shade, int(a * 235)))
+    return img
+
+
 def write(img, name):
     os.makedirs(PARTICLES, exist_ok=True)
     img.save(os.path.join(PARTICLES, name + ".png"))
@@ -731,6 +807,12 @@ def main():
     for x in range(16):
         icon.putpixel((x, 15), (92, 66, 40, 255))
     icon.resize((128, 128), Image.NEAREST).save(os.path.join(ROOT, "realisticdisasters_logo.png"))
+
+    for i in range(4):
+        write(fireball_texture(400 + i), f"meteor_fireball_{i}")
+        write(streak_texture(500 + i), f"meteor_streak_{i}")
+        write(ember_texture(600 + i), f"meteor_ember_{i}")
+        write(smoke_texture(700 + i), f"meteor_smoke_{i}")
 
 
 if __name__ == "__main__":

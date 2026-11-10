@@ -16,6 +16,8 @@ Full design spec: [`docs/SPEC.md`](docs/SPEC.md).
 | Earthquake, Volcano, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
 | Volcano | ✅ complete |
 | Earthquake, Wildfire, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
+| Meteor shower | ✅ complete |
+| Earthquake, Wildfire, Volcano, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
 
 ## Commands (op level 2)
 
@@ -289,6 +291,26 @@ compared with reference photos. Everything is built to sit seamlessly in Minecra
 - **Volcanic lightning** (visual only, never starts fires) strikes around the vent during strong eruptions.
 - **Mobs flee**, villagers take shelter. All block changes respect `blockDestruction`, spawn protection, protected areas
   and claims.
+## Testing a meteor shower in-game
+
+1. `./gradlew runClient`, create a world with cheats on. `/time set midnight` shows the streaks best.
+2. `/disaster start meteor_shower 4` (centred 48 blocks in front of you; craters land within ~58 blocks of that point).
+   Stand back: craters are 4-10 blocks in radius (the big one at intensity ≥3 up to ~20), the blast throws and hurts
+   you far beyond the rim, and windows shatter out to ~60 blocks.
+3. Phases: **warning** (~28 s: thin shooting stars streak across the sky from one radiant point; bright ones have a
+   green or yellow head, some leave a fading train or end in a flare, a few whoosh faintly; animals start drifting away), **buildup** (~15 s: the first small fireballs reach the ground),
+   **peak** (36–80 s, longer at higher intensity: a barrage of fireballs; at intensity ≥4 one big meteor near the
+   middle), **aftermath** (~20 s: the streaks die down, craters keep smoking for about two minutes).
+4. Each fireball: white-hot head with a coloured halo, shedding glowing fragments, leaving a smoke trail that hangs in
+   the sky. At night big ones light up the land. Impact: flash (sky flash + white-out when close), a fireball that
+   cools into black smoke, real blocks thrown out on ballistic arcs, a dust ring racing out (coloured like the
+   ground), then a rising dust plume. You feel the ground shake first, then the air blast (17 blocks/tick, the
+   speed of sound) throws you back and the boom arrives with it. Inside the crater it's lethal; armour and Blast
+   Protection help. Glass shatters, leaves are stripped and plants flattened around the impact.
+   Walk into a crater afterwards: a bowl about a fifth as deep as it is wide, a raised rim, an ejecta blanket that
+   thins out to about a diameter away, burnt turf, crushed rock (cobble/gravel/tuff, or coarse dirt in soil) lining
+   the bowl, a dark melt patch on the floor and a small meteorite at the bottom with a chance of rare ores.
+5. To see a solid ore core, set `oreChance = 1.0` in the `meteor_shower` config section.
 
 ## Automated tests
 
@@ -322,6 +344,16 @@ compared with reference photos. Everything is built to sit seamlessly in Minecra
 - `volcano_mountain_scales`: size grows with intensity (mountain-sized at 5); a growing mountain has its summit over the vent
 
 Volcano tests confine the volcano to an 18-block radius (`confineForTest`) because GameTest arenas are only 37 blocks apart.
+- `meteor_impact_makes_crater`: a meteor carves a bowl with a lining and a raised rim, and the shockwave throws a pig
+- `meteor_core_contains_ores`: with `oreChance = 1` the meteorite core is made of configured ores
+- `meteor_respects_block_toggle`: with `blockDestruction=false` three impacts change no blocks
+- `meteor_intensity3_tick_cost`: peak barrage plus two craters stays below 2 ms/tick (measured ~0.35 ms)
+- `meteor_sync_payload_roundtrip`: the sync packet with a full meteor ring buffer decodes without leftover bytes
+- `meteor_blast_shatters_glass_and_throws_ejecta`: glass and panes ~14 blocks out shatter; real blocks fly out
+
+Tests start from a clean slate (leftover disasters stopped, block queue cleared), move the GameTest world spawn away
+from the arena (vanilla spawn protection would otherwise protect part of it via the claim check), and only write
+config values that differ.
 
 ## Configuration
 
@@ -337,6 +369,9 @@ Volcano tests confine the volcano to an 18-block radius (`confineForTest`) becau
   The tornado section also has max debris, duration scale, and whether it changes the weather. The volcano section has
   max bombs, duration scale, mountain growth, lava flows, cooling time, volcanic lightning, pyroclastic flows and ash fall; its default biomes are `#minecraft:is_mountain`
   and the windswept hills.
+  The meteor_shower section (default biomes: `#minecraft:is_overworld`, i.e. anywhere in the overworld) has duration
+  scale, impact rate, crater scale, ore chance, the ore list (`"block_id"` or `"block_id*weight"`), rim fires on/off,
+  max flying ejecta per impact, and blast damage (glass/leaves/plants) on/off.
 - `config/realisticdisasters-client.toml`: camera shake on/off and strength, FOV pulse, particle density, fog, sky tint.
   Also editable in-game: Mods → Realistic Natural Disasters → Config.
 
@@ -356,6 +391,8 @@ common (server-safe)
   disaster/volcano/VolcanoEdifice   the growing mountain (time-budgeted builder, shape, strata, lifting entities)
   disaster/volcano/PyroclasticFlow  hot ash avalanche;  AshFall + AshLayerBlock: ash deposits
   disaster/volcano/LavaBombEntity   projectile, rendered as a full-bright magma block
+  disaster/meteor/MeteorShowerDisaster   impacts scheduled ahead + synced in a ring buffer; blast physics; ballistic ejecta
+  disaster/meteor/Crater, BlastDamage     crater carving per column; glass / leaves / plants around the impact
   network/                   DisasterSyncPayload (every 4 ticks), DisasterRemovePayload
   command/DisasterCommand, config/, registry/ModRegistries (sounds, particles, damage type key)
 client (Dist.CLIENT only)
@@ -369,6 +406,8 @@ mixin/CameraMixin            lets the earthquake offset the camera position
   DisasterVisual(s)          per-type particles + sounds (tornado/TornadoVisual, volcano/VolcanoVisual)
   volcano/VoxelCloud(+Renderer)  volumetric voxel clouds drawn like vanilla clouds (SubmitCustomGeometryEvent,
                              own pipelines + shader with vanilla fog); SparkParticle lava spatter; AshParticle ash flakes
+  DisasterVisual(s)          per-type particles + sounds (tornado/TornadoVisual, meteor/MeteorShowerVisual)
+  meteor/MeteorParticle      self-lit trail / fireball / ember particles; MeteorFlashOverlay (GUI layer)
   particle/VortexParticle    funnel / debris / dust particles that orbit their disaster
   particle/WildfireParticle  smoke, convection billows, smoke layer, smoulder wisps, flame tongues, embers, ash
   sound/DisasterLoopSound    cross-fading positional (near) and non-attenuated (far) loops
@@ -391,6 +430,26 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
   leaves etc. land where they're thrown. When the cap is reached, blocks are destroyed without drops.
 - **Weather:** in the overworld a tornado starts rain (thunder at intensity ≥3) unless it's already thundering.
   Weather is global, so this affects the whole overworld.
+- **Meteor shower look:** soft light and smoke (64x64 gaussian glow and billowy smoke sprites, tinted per particle)
+  so streaks, fireballs, smoke trails and dust read like the real phenomenon; blocks, fragments and craters stay
+  vanilla. Behaviour follows real observations: thin streaks of 0.3-0.8 s, green/white/yellow heads, short persistent
+  trains, terminal flares, lingering bolide smoke trails, landscape illumination, flash first and boom later;
+  craters follow simple-crater morphology (depth ≈ D/5, raised rim, ejecta ∝ r⁻³, breccia lining). The sky is not
+  tinted: real showers don't change its colour.
+- **Meteors are not entities.** Each impact is scheduled 2.5 s ahead and sent to clients in the regular sync packet
+  (a 4-slot ring buffer in the type-specific data), so the client draws the fireball falling along a path that ends
+  exactly at the impact point. Cheaper and more reliable than projectile entities, and nothing can intercept them.
+- **Sky streaks are client-only** and random per player (they carry no gameplay); only real impacts are synced.
+- **Impact physics.** Crater radius R ∝ meteor size (a proxy for the cube root of the impact energy). The blast
+  front starts at the crater rim and travels at the speed of sound (17 blocks/tick); effects use the scaled distance
+  z = r/R like real blast scaling: lethal for z < 1, damage ∝ (1.3/z)² to z ≈ 3-4, knockback ∝ 1/z out to z ≈ 6.
+  Ejecta are real falling blocks launched at 45° ± 12° with the speed needed to land 1.2-3R away under Minecraft's
+  gravity (0.04 b/t²) and drag (0.98/tick); a third of them go downrange of the meteor's travel direction. The
+  client shakes the camera first with the ground wave and then with the air blast, timed to the same speeds. The screen flash honours the vanilla "Hide Lightning Flashes" option.
+- **Crater blocks** go through the block-change queue one column per change (centre outward, so a crater opens in
+  under a second at the default budget), with protection checked per column (claims and protected areas are
+  column-shaped); block entities (chests etc.), bedrock and liquids are never touched. Glass shattering scans only
+  chunk sections whose palette contains glass. Flying ejecta are capped (`maxEjecta`, and 3x that per shower). The crater floor is lined, not refilled, so water nearby can flow in.
 
 - **Earthquake fissures** grow from near the epicentre in steps; each step queues one change per column across the
   crack (a column change carves up to 12 blocks), so the batching is per column, not per block. Fissures follow the
@@ -479,3 +538,12 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
   stays slightly smaller.
 - Volcano: the mountain is not reverted afterwards (damage persists by design). Pyroclastic flows and ash fall reach far
   (hundreds of blocks at intensity 5).
+- Meteor shower: streaks are chains of overlapping soft particles (vanilla has no line/ribbon particle); very close
+  up you can see the individual glows. On "Minimal" particles they are sparse by design. Particle blending is alpha,
+  not additive, so overlapping glows don't over-brighten like a camera would.
+  Impacts outside the client's loaded chunks still happen on the server but only the distant boom is heard if in sync range.
+  Craters in water/lava columns only remove the solid blocks; the liquid stays.
+  The biggest impacts change a few thousand blocks; at the default 48 changes/tick that is spread over ~1-2 s, with a
+  short server-cost bump while it happens (the intensity-3 average stays well under 1 ms/tick).
+  Ejecta landing spots are taken from where the falling block stops; one that lands in a protected area or on a
+  non-sturdy block simply vanishes (no item drop).

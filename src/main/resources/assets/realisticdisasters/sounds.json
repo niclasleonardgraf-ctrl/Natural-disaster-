@@ -258,5 +258,45 @@
         "attenuation_distance": 48
       }
     ]
+  },
+  "disaster.meteor.whoosh": {
+    "subtitle": "subtitles.realisticdisasters.meteor.whoosh",
+    "sounds": [
+      {
+        "name": "realisticdisasters:meteor_whoosh1",
+        "attenuation_distance": 64
+      },
+      {
+        "name": "realisticdisasters:meteor_whoosh2",
+        "attenuation_distance": 64
+      }
+    ]
+  },
+  "disaster.meteor.whoosh_distant": {
+    "subtitle": "subtitles.realisticdisasters.meteor.whoosh_distant",
+    "sounds": [
+      "realisticdisasters:meteor_whoosh_distant1",
+      "realisticdisasters:meteor_whoosh_distant2"
+    ]
+  },
+  "disaster.meteor.impact": {
+    "subtitle": "subtitles.realisticdisasters.meteor.impact",
+    "sounds": [
+      {
+        "name": "realisticdisasters:meteor_impact1",
+        "attenuation_distance": 64
+      },
+      {
+        "name": "realisticdisasters:meteor_impact2",
+        "attenuation_distance": 64
+      }
+    ]
+  },
+  "disaster.meteor.impact_distant": {
+    "subtitle": "subtitles.realisticdisasters.meteor.impact_distant",
+    "sounds": [
+      "realisticdisasters:meteor_impact_distant1",
+      "realisticdisasters:meteor_impact_distant2"
+    ]
   }
 }
