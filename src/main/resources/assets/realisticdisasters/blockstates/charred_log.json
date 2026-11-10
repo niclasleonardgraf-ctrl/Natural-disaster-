@@ -1,0 +1,28 @@
+{
+  "variants": {
+    "axis=x,smoldering=false": {
+      "model": "realisticdisasters:block/charred_log_horizontal",
+      "x": 90,
+      "y": 90
+    },
+    "axis=y,smoldering=false": {
+      "model": "realisticdisasters:block/charred_log"
+    },
+    "axis=z,smoldering=false": {
+      "model": "realisticdisasters:block/charred_log_horizontal",
+      "x": 90
+    },
+    "axis=x,smoldering=true": {
+      "model": "realisticdisasters:block/charred_log_horizontal",
+      "x": 90,
+      "y": 90
+    },
+    "axis=y,smoldering=true": {
+      "model": "realisticdisasters:block/charred_log"
+    },
+    "axis=z,smoldering=true": {
+      "model": "realisticdisasters:block/charred_log_horizontal",
+      "x": 90
+    }
+  }
+}

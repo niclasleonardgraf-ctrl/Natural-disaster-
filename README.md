@@ -10,7 +10,8 @@ Full design spec: [`docs/SPEC.md`](docs/SPEC.md).
 | Disaster | State |
 |---|---|
 | Tornado | ✅ complete |
-| Earthquake, Wildfire, Volcano, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
+| Wildfire | ✅ complete |
+| Earthquake, Volcano, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
 
 ## Commands (op level 2)
 
@@ -100,6 +101,38 @@ Layers cross-fade with distance, like real recordings:
 Sheltering muffles the high, violent layers while the low rumble comes through. All sounds are original and
 synthesized by `tools/gen_sounds.py`.
 
+## Testing a wildfire in-game
+
+1. `./gradlew runClient`, create a world with cheats on. A forest, savanna or taiga shows it best.
+2. `/disaster start wildfire 3`: it ignites 48 blocks in front of you. Stand downwind to get the full smoke pall.
+3. Phases: **warning** (~20 s: a small fire smoulders, smoke rises, the sky starts turning orange, animals flee),
+   **buildup** (~20 s: the wind picks it up), **peak** (80–160 s depending on intensity: a front races downwind,
+   embers start spot fires ahead of it, smoke columns lean with the wind, ash falls), **aftermath** (~25 s: no new
+   spread, the last columns burn out).
+4. Afterwards the burn scar stays: black, ash-covered **scorched earth**, **charred logs** and rust-brown **scorched
+   leaves** where the crowns were only scorched (stronger fires consume more foliage). Burnt ground and trunks keep
+   smouldering for a minute or two (thin smoke, the odd ember). Over time scorched earth weathers back into dirt and
+   grass regrows (`regrowth`). Water, sand, stone, bare dirt and cliffs act as firebreaks. Rain slows it a lot.
+5. Walking into the flames sets you on fire (fire resistance protects).
+
+### What the wildfire looks like
+Matched against real fire photos (crown fire in spruce forest, the Dome Fire and Beaver Complex plumes, prescribed
+burns, a boreal forest after fire):
+- **Flames:** the flame block carries a smoothly animated (interpolated), high-resolution flame texture on vanilla's
+  fire geometry, so flames burn exactly where the fire is and light the terrain. Torching crowns add tall,
+  animated flame-tongue particles one to two tree heights above the canopy; far away, fewer but larger flames keep
+  the fire line readable.
+- **Smoke:** dark grey-brown smoke boils off forest fires, paler grey-white smoke off grass. A convection column of
+  soft cauliflower billows (sunlit tops, shadowed undersides) towers up to an inversion height, bent downwind by
+  wind that strengthens with altitude, and spreads into a tan smoke layer that streams hundreds of blocks downwind.
+  The base of the column is lit by the fire, which shows as an orange glow at night. Smoke right in front of the
+  camera fades out instead of filling the screen.
+- **Light:** the sky stays blue upwind; under the plume the light turns hazy yellow-brown, and near the flames (and
+  at night) the fog and sky glow orange.
+- **Embers and ash:** glowing sparks lofted out of torching trees and carried downwind, pale ash flakes tumbling down
+  under the smoke layer.
+- Blocks (charred log, scorched earth, scorched leaves) stay 16x16 so they sit naturally among vanilla blocks.
+
 ## Automated tests
 
 `./gradlew runGameTestServer`. These run on a dedicated-server dist, so they also check that no client-only code loads on a server:
@@ -108,6 +141,11 @@ synthesized by `tools/gen_sounds.py`.
 - `tornado_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.2–0.3 ms)
 - `tornado_shelter_protects`: an animal in a sealed bunker stays put while an exposed one is lifted
 - `tornado_breaks_glass_and_snaps_trees`: glass shatters and a trunk snaps, leaving a stump
+- `wildfire_burns_and_chars`: the fire spreads, turf becomes scorched earth, tree trunks are charred, the canopy burns
+  away or is scorched, and a pig flees or catches fire
+- `wildfire_respects_block_toggle`: with `blockDestruction=false` the fire still runs (visuals, entity damage) but no block changes
+- `wildfire_intensity3_tick_cost`: on a 48x48 field (~1000 columns burnt in 15 s) the cost stays below 2 ms/tick
+  (measured 0.55–0.9 ms)
 
 ## Configuration
 
@@ -115,6 +153,8 @@ synthesized by `tools/gen_sounds.py`.
   max active disasters, sync range, block destruction on/off, block changes per tick, spawn-protection radius,
   claim-mod respect, extra protected areas (`"dimension,x,z,radius"`), and per-disaster enable / weight / biomes.
   The tornado section also has max debris, duration scale, and whether it changes the weather.
+  The wildfire section has the dry-biome bonus, max ignitions per tick, max area, spread speed, duration scale and
+  whether rain slows it.
 - `config/realisticdisasters-client.toml`: camera shake on/off and strength, FOV pulse, particle density, fog, sky tint.
   Also editable in-game: Mods → Realistic Natural Disasters → Config.
 
@@ -127,13 +167,16 @@ common (server-safe)
   disaster/DisasterProtection  config + spawn radius + protected areas + claim mods
   disaster/DisasterType      registry of kinds (factory, enable flag, weight, biomes)
   disaster/tornado/TornadoDisaster
+  disaster/wildfire/WildfireDisaster   grid fire front, fuel model, charring; WildfireFlameBlock (self-extinguishing),
+                             CharredLogBlock / ScorchedEarthBlock (smouldering state), scorched leaves
   network/                   DisasterSyncPayload (every 4 ticks), DisasterRemovePayload
   command/DisasterCommand, config/, registry/ModRegistries (sounds, particles, damage type key)
 client (Dist.CLIENT only)
   ClientDisasters / ClientDisaster   interpolated mirror of server state, fade-out after removal
   EffectsManager             blends all disasters into sky/fog/cloud tint, fog distance, shake, FOV
-  DisasterVisual(s)          per-type particles + sounds (tornado/TornadoVisual)
+  DisasterVisual(s)          per-type particles + sounds (tornado/TornadoVisual, wildfire/WildfireVisual)
   particle/VortexParticle    funnel / debris / dust particles that orbit their disaster
+  particle/WildfireParticle  smoke, convection billows, smoke layer, smoulder wisps, flame tongues, embers, ash
   sound/DisasterLoopSound    cross-fading positional (near) and non-attenuated (far) loops
 mixin/ClientLevelMixin       adds environment-attribute layers for sky, fog, cloud colour and sky light
 ```
@@ -155,6 +198,18 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
 - **Weather:** in the overworld a tornado starts rain (thunder at intensity ≥3) unless it's already thundering.
   Weather is global, so this affects the whole overworld.
 
+- **Wildfire spread is simulated, not vanilla fire.** The fire front lives on a grid of block columns (burn timer
+  per column, downwind-biased spread, ember spotting, fuel per column), capped per tick and applied through the block
+  queue. The visible flames are a mod block (`wildfire_flame`) that burns entities like vanilla fire but never spreads
+  and goes out on its own after a few seconds, even after a restart. Vanilla fire would spread uncontrollably and
+  bypass the caps.
+- **Wildfire sync:** the 32-float sync limit allows 12 burning columns per packet. The server sends a random 12 each
+  time and the client remembers the last few seconds of them, so particles and sounds come from the whole front.
+- **Natural spawning weight per biome:** `DisasterType` got an optional per-biome weight hook (default: unchanged), and
+  `DisasterManager` asks it instead of the flat weight. Wildfires use it to favour hot, dry biomes (`dryBiomeBonus`).
+- `tools/gen_structures.py` now writes block-state properties correctly (they used to end up in the block name).
+  `tornado_arena.nbt` was not regenerated, so the tornado tests run on exactly the same arena as before.
+
 ## Known issues
 
 - Sound has not been heard-tested: the build container has no audio device. The sound files and their playback code
@@ -166,3 +221,13 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
 - Cloud sheets fade out before the render-distance fog, which would otherwise paint them bright. With very low render
   distances (< 8 chunks), the storm base therefore covers less of the sky.
 - The weather change is global (vanilla limitation).
+- Wildfire: wooden buildings in the path burn down partly (chance grows with intensity). Containers and other block
+  entities are never touched, so a burnt house can leave chests standing. Use protected areas / claims for bases.
+- Wildfire: a fire started in the rain (also via command) usually fizzles out in the warning phase and goes straight
+  to the aftermath. That's intentional (`rainSlows`), but it can look like nothing happened.
+- Wildfire: flame blocks sit on top of a column and under the canopy, not on every log face; trunks get no flames of
+  their own (the torching particles cover the crown).
+- Wildfire: particles are sampled without texture filtering by Minecraft, so very large smoke puffs can show slightly
+  stepped edges. 128 px textures and the near-camera fade keep this small.
+- Wildfire: the flame block's animated texture is high resolution, unlike vanilla's 16x16 fire. That's deliberate
+  (realism first) but it is the one place where the fire doesn't match vanilla's pixel style.

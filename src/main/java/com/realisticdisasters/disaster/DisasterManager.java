@@ -176,15 +176,15 @@ public final class DisasterManager {
         List<DisasterType> candidates = new ArrayList<>();
         int total = 0;
         for (DisasterType type : DisasterType.values()) {
-            if (type.enabled() && type.weight() > 0 && biomeMatches(biome, type.biomes())) {
+            if (type.enabled() && type.weight(biome) > 0 && biomeMatches(biome, type.biomes())) {
                 candidates.add(type);
-                total += type.weight();
+                total += type.weight(biome);
             }
         }
         if (total <= 0) return;
         int roll = level.getRandom().nextInt(total);
         for (DisasterType type : candidates) {
-            roll -= type.weight();
+            roll -= type.weight(biome);
             if (roll < 0) {
                 // natural intensity: weighted toward the low end
                 int max = DisasterConfig.MAX_INTENSITY.getAsInt();

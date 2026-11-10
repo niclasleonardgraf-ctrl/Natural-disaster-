@@ -31,6 +31,15 @@ def payload(tag_type, value):
     raise ValueError(tag_type)
 
 
+def palette_entry(state):
+    """"minecraft:oak_leaves[persistent=true]" -> {Name, Properties}."""
+    if "[" not in state:
+        return {"Name": (8, state)}
+    name, props = state[:-1].split("[", 1)
+    values = dict(kv.split("=") for kv in props.split(","))
+    return {"Name": (8, name), "Properties": (10, {k: (8, v) for k, v in values.items()})}
+
+
 def write_structure(name, size, blocks):
     palette, index = [], {}
     entries = []
@@ -42,7 +51,7 @@ def write_structure(name, size, blocks):
     root = {
         "DataVersion": (3, DATA_VERSION),
         "size": (9, (3, list(size))),
-        "palette": (9, (10, [{"Name": (8, s)} for s in palette])),
+        "palette": (9, (10, [palette_entry(s) for s in palette])),
         "blocks": (9, (10, [{"pos": (9, (3, list(p))), "state": (3, i)} for p, i in entries])),
         "entities": (9, (10, [])),
     }
@@ -88,5 +97,43 @@ def arena():
     write_structure("tornado_arena", (sx, sy, sz), blocks)
 
 
+def wildfire_arena(name="wildfire_arena", sx=32, sz=32, trees=((8, 8), (24, 10), (11, 24))):
+    """Grass with brush patches and oak trees: fuel of every kind for the wildfire tests."""
+    sy = 12
+    blocks = {}
+    for x in range(sx):
+        for z in range(sz):
+            blocks[(x, 0, z)] = "minecraft:stone"
+            blocks[(x, 1, z)] = "minecraft:dirt"
+            blocks[(x, 2, z)] = "minecraft:dirt"
+            blocks[(x, 3, z)] = "minecraft:grass_block"
+            # deterministic brush pattern: short grass, some tall grass and ferns
+            h = (x * 7 + z * 13) % 11
+            if h in (0, 3, 7):
+                blocks[(x, 4, z)] = "minecraft:short_grass"
+            elif h == 5:
+                blocks[(x, 4, z)] = "minecraft:fern"
+    for tx, tz in trees:
+        blocks[(tx, 3, tz)] = "minecraft:dirt"
+        for y in range(4, 9):
+            blocks[(tx, y, tz)] = "minecraft:oak_log"
+        for x in range(tx - 2, tx + 3):
+            for z in range(tz - 2, tz + 3):
+                for y in (7, 8, 9):
+                    r = 2 if y < 9 else 1
+                    if abs(x - tx) <= r and abs(z - tz) <= r and (x, y, z) not in blocks:
+                        blocks[(x, y, z)] = "minecraft:oak_leaves[persistent=true]"
+                if (x, 4, z) in blocks and blocks[(x, 4, z)] != "minecraft:oak_log":
+                    del blocks[(x, 4, z)]  # no brush right under the canopy
+    for x in range(sx):
+        for y in range(4, sy):
+            for z in range(sz):
+                blocks.setdefault((x, y, z), "minecraft:air")
+    write_structure(name, (sx, sy, sz), blocks)
+
+
 if __name__ == "__main__":
     arena()
+    wildfire_arena()
+    # bigger field for the wildfire performance test, so an intensity-3 fire has room to build a real front
+    wildfire_arena("wildfire_field", 48, 48, [(x, z) for x in range(8, 46, 13) for z in range(9, 46, 14)])

@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:block/template_fire_floor",
+  "textures": {
+    "fire": "realisticdisasters:block/wildfire_flame_1"
+  }
+}

@@ -243,6 +243,56 @@ def gust(rng, seconds=3.0):
     return normalize(x * env, 0.75)
 
 
+def fire_crackle(rng, seconds=6.0):
+    """Close wildfire layer: soft hiss bed with dense random crackles and snaps."""
+    n = int(seconds * RATE)
+    bed = bandpass(rng.standard_normal(n), 300, 3000) * 0.12 * (0.6 + 0.4 * smooth_noise(n, 3, rng))
+    clicks = np.zeros(n)
+    count = int(seconds * 55)
+    for _ in range(count):
+        at = rng.integers(0, n - 2000)
+        length = int(rng.integers(40, 900))
+        amp = rng.random() ** 2.5
+        burst = rng.standard_normal(length) * np.exp(-np.linspace(0, rng.uniform(4, 12), length))
+        clicks[at:at + length] += burst * amp
+    clicks = bandpass(clicks, 700, 9000)
+    x = bed + clicks * 0.9
+    return normalize(loopable(x, 0.3), 0.8)
+
+
+def fire_roar(rng, seconds=8.0):
+    """Mid layer: the deep, fluttering roar of a large flame front."""
+    n = int(seconds * RATE)
+    low = fast_lowpass(rng.standard_normal(n), 260)
+    body = bandpass(rng.standard_normal(n), 200, 1100) * 0.4
+    t = np.arange(n) / RATE
+    flutter = 0.75 + 0.25 * np.sin(2 * np.pi * (9 + 3 * smooth_noise(n, 0.7, rng)) * t)  # flame flicker
+    surge = 0.6 + 0.4 * smooth_noise(n, 0.6, rng)
+    x = (low * 1.4 + body * flutter) * surge
+    return normalize(loopable(x), 0.85)
+
+
+def fire_distant(rng, seconds=10.0):
+    """Far layer: a wide, muffled whoosh-rumble with slow surges."""
+    n = int(seconds * RATE)
+    brown = np.cumsum(rng.standard_normal(n))
+    brown -= fast_lowpass(brown, 6)
+    x = fast_lowpass(brown, 180) + fast_lowpass(rng.standard_normal(n), 500) * 0.15
+    x *= 0.65 + 0.35 * smooth_noise(n, 0.4, rng)
+    return normalize(loopable(x), 0.9)
+
+
+def fire_pop(rng, seconds=1.2):
+    """One-shot: a burning branch snapping (sharp crack + short woody thump + sizzle)."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, seconds, n)
+    crack = bandpass(rng.standard_normal(n), 1200, 9000) * np.exp(-t * 60)
+    thump = fast_lowpass(rng.standard_normal(n), 300) * np.exp(-t * 18) * 0.8
+    sizzle = bandpass(rng.standard_normal(n), 2500, 8000) * np.exp(-t * 4) * 0.08
+    x = crack + thump + sizzle
+    return normalize(x, 0.9)
+
+
 def main():
     rng = np.random.default_rng(1234)
     write_ogg("tornado_distant", tornado_distant(rng))
@@ -255,6 +305,17 @@ def main():
         write_ogg(f"debris_thud{i}", debris_thud(rng))
         write_ogg(f"wood_snap{i}", wood_snap(rng))
         write_ogg(f"debris_rattle{i}", debris_rattle(rng))
+    write_wildfire()
+
+
+def write_wildfire():
+    # separate seed so adding sounds never changes the existing files
+    rng = np.random.default_rng(4321)
+    write_ogg("wildfire_crackle", fire_crackle(rng))
+    write_ogg("wildfire_roar", fire_roar(rng))
+    write_ogg("wildfire_distant", fire_distant(rng))
+    for i in range(1, 4):
+        write_ogg(f"wildfire_pop{i}", fire_pop(rng))
 
 
 if __name__ == "__main__":

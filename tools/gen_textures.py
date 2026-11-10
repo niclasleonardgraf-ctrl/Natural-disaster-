@@ -17,6 +17,7 @@ PARTICLES = os.path.join(ROOT, "assets", "realisticdisasters", "textures", "part
 CLOUD = [(236, 236, 232), (206, 207, 201), (172, 174, 168), (138, 140, 134)]
 DUST = [(232, 228, 220), (206, 201, 192), (176, 170, 160), (144, 138, 128)]  # neutral: tinted in code
 DEBRIS = [(118, 86, 54), (92, 66, 40), (86, 120, 52), (64, 92, 38), (128, 128, 128), (98, 98, 98)]
+BLOCKS = os.path.join(ROOT, "assets", "realisticdisasters", "textures", "block")
 
 
 def blob(size, rng, lobes, fill=1.0):
@@ -313,6 +314,289 @@ def write_entity_texture(img, name):
         json.dump({"texture": {"blur": True}}, f)   # smooth filtering, repeat wrapping (default)
 
 
+# ---------------------------------------------------------------- wildfire (realistic particles, vanilla-style blocks)
+
+def _periodic_noise(w, h, rng, cells_x, cells_y, shift_y=0.0):
+    """Value noise that tiles vertically (period = cells_y), sampled with a vertical offset (in cells)."""
+    import numpy as np
+    grid = rng.random((cells_y, cells_x + 1))
+    ys = (np.arange(h) / h * cells_y + shift_y) % cells_y
+    xs = np.arange(w) / w * cells_x
+    yi = ys.astype(int)
+    yf = ys - yi
+    yf = yf * yf * (3 - 2 * yf)
+    xi = xs.astype(int)
+    xf = xs - xi
+    xf = xf * xf * (3 - 2 * xf)
+    y1 = (yi + 1) % cells_y
+    g00 = grid[np.ix_(yi, xi)]
+    g01 = grid[np.ix_(yi, xi + 1)]
+    g10 = grid[np.ix_(y1, xi)]
+    g11 = grid[np.ix_(y1, xi + 1)]
+    top = g00 + (g01 - g00) * xf[None, :]
+    bot = g10 + (g11 - g10) * xf[None, :]
+    return top + (bot - top) * yf[:, None]
+
+
+def fire_tongue(seed, frame, frames=8, size=64):
+    """One frame of a looping flame: noise rises through a tapering tongue; white-yellow core, orange body,
+    red translucent edges. Frames loop seamlessly (the noise is periodic in the scroll direction)."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    t = frame / frames
+    layers = [(4, 4, 1.0), (8, 8, 0.5), (16, 16, 0.25)]
+    n = np.zeros((size, size))
+    for i, (cx, cy, amp) in enumerate(layers):
+        r2 = np.random.default_rng(seed * 7 + i)
+        n += _periodic_noise(size, size, r2, cx, cy, shift_y=t * cy) * amp
+    n /= sum(a for _, _, a in layers)
+    sway = (_periodic_noise(1, size, np.random.default_rng(seed + 99), 1, 4, shift_y=t * 4)[:, 0] - 0.5) * 0.5
+    warp = _periodic_noise(size, size, np.random.default_rng(seed + 55), 6, 6, shift_y=t * 6) - 0.5
+    v = np.linspace(1, 0, size)[:, None]           # 0 at the bottom row, 1 at the top
+    u = np.linspace(-1, 1, size)[None, :]
+    width = 0.72 * (1 - v) ** 0.55 + 0.06             # wide base, tapering tongue
+    # turbulence bends the flame more the higher it gets -> licks and curls instead of a cone
+    lateral = (u - sway[:, None] * v - warp * 0.55 * v) / width
+    shape = np.clip(1 - lateral ** 2, 0, 1)
+    shape *= np.clip(v * 8, 0, 1)                    # soft bottom edge
+    # rising "erosion" threshold: the body is solid, the upper part tears into separate tongues
+    heat = shape * (0.25 + 1.05 * n) - v ** 1.3 * 0.62
+    heat = np.clip(heat * 1.25, 0, 1)
+    # colour ramp: deep red -> orange -> yellow -> warm white
+    stops = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
+    cols = np.array([[120, 20, 4], [215, 70, 10], [255, 140, 30], [255, 210, 90], [255, 248, 210]], dtype=float)
+    rgb = np.stack([np.interp(heat, stops, cols[:, c]) for c in range(3)], axis=-1)
+    a = np.clip((heat - 0.08) * 2.2, 0, 1)
+    img = np.dstack([rgb.astype("uint8"), (a * 255).astype("uint8")])
+    return Image.fromarray(img, "RGBA")
+
+
+def flame_sheet_frame(seed, frame, frames, size=64):
+    """One frame of the wildfire flame block: a row of three flame tongues of different heights, rising noise,
+    white-yellow cores and red, translucent tips. Loops seamlessly over `frames`."""
+    import numpy as np
+    t = frame / frames
+    v = np.linspace(1, 0, size)[:, None]
+    u = np.linspace(-1, 1, size)[None, :]
+    n = np.zeros((size, size))
+    for i, (c, amp) in enumerate([(4, 1.0), (8, 0.5), (16, 0.25)]):
+        n += _periodic_noise(size, size, np.random.default_rng(seed * 11 + i), c, c, shift_y=t * c) * amp
+    n /= 1.75
+    warp = _periodic_noise(size, size, np.random.default_rng(seed * 11 + 7), 6, 6, shift_y=t * 6) - 0.5
+    heat = np.zeros((size, size))
+    for k, (cx, w, hgt) in enumerate([(-0.55, 0.42, 0.75), (0.05, 0.5, 1.0), (0.6, 0.4, 0.62)]):
+        sway = (_periodic_noise(1, size, np.random.default_rng(seed * 13 + k), 1, 4, shift_y=t * 4)[:, 0] - 0.5) * 0.4
+        vv = v / hgt
+        width = w * np.clip(1 - vv, 0, 1) ** 0.55 + 0.03
+        lateral = (u - cx - sway[:, None] * vv - warp * 0.5 * vv) / width
+        shape = np.clip(1 - lateral ** 2, 0, 1) * (vv < 1)
+        heat = np.maximum(heat, shape * (0.3 + 1.0 * n) - vv ** 1.3 * 0.6)
+    heat = np.clip(heat * 1.3, 0, 1)
+    stops = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
+    cols = np.array([[120, 20, 4], [215, 70, 10], [255, 140, 30], [255, 210, 90], [255, 248, 210]], dtype=float)
+    rgb = np.stack([np.interp(heat, stops, cols[:, c]) for c in range(3)], axis=-1)
+    a = np.clip((heat - 0.08) * 2.4, 0, 1)
+    return np.dstack([rgb.astype("uint8"), (a * 255).astype("uint8")])
+
+
+def write_flame_block(name, seed, frames=16, size=64):
+    """Animated block texture: frames stacked vertically + .mcmeta with smooth frame interpolation."""
+    import json
+    import numpy as np
+    strip = np.vstack([flame_sheet_frame(seed, f, frames, size) for f in range(frames)])
+    write_block(Image.fromarray(strip, "RGBA"), name)
+    with open(os.path.join(BLOCKS, name + ".png.mcmeta"), "w") as fh:
+        json.dump({"animation": {"frametime": 2, "interpolate": True}}, fh, indent=2)
+        fh.write("\n")
+
+
+def smoke_billow(seed, size=64):
+    """Convection-column puff: a dense, lumpy body made of a few overlapping soft lobes (cauliflower outline),
+    fine turbulent detail from fractal noise, lit from above (bright top, shadowed underside). Rendered at 2x and
+    downsampled. Near-neutral; tinted per particle in code."""
+    import numpy as np
+    from PIL import ImageFilter
+    final = size
+    size = size * 2
+    rng = np.random.default_rng(seed)
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    detail = fbm(size, rng, octaves=6, base=3)
+    lumps = fbm(size, rng, octaves=3, base=2)
+    body = np.zeros((size, size))
+    for _ in range(5):
+        cx, cy = rng.uniform(-0.35, 0.35), rng.uniform(-0.35, 0.2)
+        r = rng.uniform(0.35, 0.55)
+        d = np.sqrt((x - cx) ** 2 + (y - cy) ** 2) / r
+        body = np.maximum(body, np.clip(1 - d, 0, 1))
+    edge = np.clip((1.0 - np.sqrt(x * x + y * y)) / 0.3, 0, 1)  # keep everything inside the quad
+    body = np.clip(body * 1.5 + (lumps - 0.5) * 0.9 + (detail - 0.5) * 1.0, 0, 1) * edge
+    a = np.clip((body - 0.18) * 2.4, 0, 1)
+    a = a * a * (3 - 2 * a)
+    # smooth top-lighting: brighter where there is less smoke above (blurred density lookup)
+    blurred = np.asarray(Image.fromarray((body * 255).astype("uint8")).filter(ImageFilter.GaussianBlur(6)), dtype=float) / 255
+    above = np.vstack([np.zeros((10, size)), blurred[:-10]])  # density 10 px higher up (no wrap-around)
+    lit = np.clip(0.72 - (above - blurred) * 1.2 - y * 0.16 + (detail - 0.5) * 0.7 + (lumps - 0.5) * 0.2, 0, 1)
+    rgb = (lit * 255).astype("uint8")
+    img = Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
+    return img.filter(ImageFilter.GaussianBlur(1.0)).resize((final, final), Image.LANCZOS)
+
+
+def glow_ember(seed, size=16):
+    """Hot spark: tiny white-hot core with a soft radial glow (alpha falloff). Tinted in code."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    sx = 1.0 + rng.uniform(0, 0.6)  # slightly elongated, like a streak
+    d = np.sqrt((x * sx) ** 2 + y * y)
+    a = np.clip(1 - d, 0, 1) ** 2.4
+    core = np.clip(1 - d * 2.5, 0, 1)
+    v = np.clip(0.75 + 0.25 * core, 0, 1)
+    rgb = (v * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
+
+
+def soft_ash(seed, size=16):
+    """Ash flake: an irregular, thin, slightly curled grey-white flake with soft edges."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    ang = rng.uniform(0, np.pi)
+    xr = x * np.cos(ang) + y * np.sin(ang)
+    yr = -x * np.sin(ang) + y * np.cos(ang)
+    n = fbm(size, rng, octaves=3, base=2)
+    d = np.sqrt((xr / 0.75) ** 2 + (yr / 0.42) ** 2) + (n - 0.5) * 0.7
+    a = np.clip((1 - d) * 3, 0, 1)
+    v = np.clip(0.72 + 0.25 * (n - 0.5) - 0.15 * yr, 0, 1)
+    rgb = (v * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
+
+
+# Blocks stay 16x16 with hard pixels so they sit naturally among vanilla blocks.
+CHAR = [(52, 49, 47), (38, 36, 35), (27, 26, 26), (17, 16, 16)]
+CHAR_SHEEN = [(92, 90, 90), (70, 68, 68)]      # silvery cracked charcoal
+ASH_GROUND = [(150, 146, 140), (118, 114, 109), (86, 82, 78)]
+SOIL = [(74, 58, 46), (58, 45, 36)]
+
+
+def charred_log_side(seed=900):
+    """Burnt bark: black blocky 'alligator' charcoal with silvery sheen on the plates and deep cracks."""
+    rng = random.Random(seed)
+    img = Image.new("RGBA", (16, 16))
+    for y in range(16):
+        for x in range(16):
+            img.putpixel((x, y), CHAR[rng.choice((1, 1, 2))] + (255,))
+    # charcoal plates separated by deep cracks (offset rows of 3-5 px tall blocks)
+    for row, y0 in enumerate(range(0, 16, 4)):
+        off = (row * 3) % 5
+        for x in range(16):
+            img.putpixel((x, y0), CHAR[3] + (255,))
+            if (x + off) % 5 == 0:
+                for y in range(y0, min(16, y0 + 4)):
+                    img.putpixel((x, y), CHAR[3] + (255,))
+        for x in range(16):
+            if (x + off) % 5 == 2 and y0 + 1 < 16:
+                img.putpixel((x, y0 + 1), CHAR_SHEEN[rng.randint(0, 1)] + (255,))
+            elif (x + off) % 5 in (1, 3) and y0 + 1 < 16 and rng.random() < 0.4:
+                img.putpixel((x, y0 + 1), CHAR[0] + (255,))
+    return img
+
+
+def charred_log_top(seed=901):
+    """Burnt end grain: black rim, dark rings, grey ash at the cracked core."""
+    rng = random.Random(seed)
+    img = Image.new("RGBA", (16, 16))
+    for y in range(16):
+        for x in range(16):
+            d = max(abs(x - 7.5), abs(y - 7.5))
+            if d > 6.5:
+                c = CHAR[3]
+            elif d < 1.6:
+                c = ASH_GROUND[rng.randint(0, 2)]
+            else:
+                c = CHAR[1 + int(d) % 2]
+                if rng.random() < 0.06:
+                    c = CHAR_SHEEN[1]
+            img.putpixel((x, y), c + (255,))
+    for i in range(2, 7):  # radial cracks
+        img.putpixel((7, 7 - i), CHAR[3] + (255,))
+        img.putpixel((8 + i, 9), CHAR[3] + (255,))
+    return img
+
+
+def scorched_earth_top(seed=910):
+    """Burnt ground seen from above: black char with grey-white ash patches and a few brown soil specks."""
+    rng = random.Random(seed)
+    img = Image.new("RGBA", (16, 16))
+    patches = [(rng.randint(0, 15), rng.randint(0, 15), rng.uniform(1.5, 3.2)) for _ in range(4)]
+    for y in range(16):
+        for x in range(16):
+            ash = any(min(abs(x - px), 16 - abs(x - px)) ** 2 + min(abs(y - py), 16 - abs(y - py)) ** 2 < r * r
+                      for px, py, r in patches)
+            if ash and rng.random() < 0.8:
+                c = ASH_GROUND[rng.choice((0, 1, 1, 2))]
+            else:
+                c = CHAR[rng.choice((0, 1, 1, 2, 3))]
+                if rng.random() < 0.07:
+                    c = SOIL[rng.randint(0, 1)]
+            img.putpixel((x, y), c + (255,))
+    return img
+
+
+def scorched_earth_side(seed=911):
+    """Side: vanilla-like dirt with a ragged black, ash-flecked burnt layer on top (like the grass block side)."""
+    rng = random.Random(seed)
+    img = Image.new("RGBA", (16, 16))
+    dirt = [(134, 96, 67), (121, 85, 58), (100, 70, 48), (150, 108, 74)]
+    for y in range(16):
+        for x in range(16):
+            img.putpixel((x, y), dirt[rng.choice((0, 0, 1, 1, 2, 3))] + (255,))
+    for x in range(16):
+        depth = 2 + rng.randint(0, 2) + (1 if rng.random() < 0.25 else 0)
+        for y in range(depth):
+            c = CHAR[rng.choice((1, 2, 3))] if rng.random() > 0.2 else ASH_GROUND[rng.randint(1, 2)]
+            img.putpixel((x, y), c + (255,))
+    return img
+
+
+def scorched_leaves(seed=920):
+    """Heat-killed foliage: vanilla leaves layout (cutout holes) in rust, tan and grey-brown dead-needle tones."""
+    rng = random.Random(seed)
+    img = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
+    tones = [(150, 92, 46), (128, 74, 36), (104, 62, 34), (88, 66, 50), (170, 118, 66), (72, 52, 40)]
+    for y in range(16):
+        for x in range(16):
+            if rng.random() < 0.3:
+                continue  # holes, like vanilla leaves (rendered as cutout)
+            img.putpixel((x, y), tones[rng.choice((0, 0, 1, 1, 2, 3, 4, 5))] + (255,))
+    return img
+
+
+def write_block(img, name):
+    os.makedirs(BLOCKS, exist_ok=True)
+    img.save(os.path.join(BLOCKS, name + ".png"))
+
+
+def write_wildfire():
+    import numpy as np  # noqa: F401  (fail early with a clear message if numpy is missing)
+    for i in range(4):
+        # 128 px: smoke quads get large on screen and particles are sampled without filtering
+        write(soft_cloud(1100 + i, size=128, density=1.0), f"wildfire_smoke_{i}")
+        write(smoke_billow(1200 + i, size=128), f"smoke_billow_{i}")
+        write(soft_ash(1300 + i), f"ash_flake_{i}")
+    for i in range(2):
+        write(glow_ember(1400 + i), f"ember_{i}")
+    for v in range(2):
+        for f in range(8):
+            write(fire_tongue(1500 + v, f), f"fire_tongue_{v * 8 + f}")
+    write_block(charred_log_side(), "charred_log")
+    write_block(charred_log_top(), "charred_log_top")
+    write_block(scorched_earth_top(), "scorched_earth_top")
+    write_block(scorched_earth_side(), "scorched_earth_side")
+    write_block(scorched_leaves(), "scorched_leaves")
+    write_flame_block("wildfire_flame_0", 1600)
+    write_flame_block("wildfire_flame_1", 1601)
+
+
 def write(img, name):
     os.makedirs(PARTICLES, exist_ok=True)
     img.save(os.path.join(PARTICLES, name + ".png"))
@@ -330,6 +614,7 @@ def main():
         write(soft_cloud(200 + i, density=0.85, wispy=True), f"dust_cloud_{i}")
         write(rain_shaft(400 + i), f"rain_shaft_{i}")
         write(debris_texture(300 + i), f"storm_debris_{i}")
+    write_wildfire()
 
     # 3D funnel mesh
     write_entity_texture(funnel_core_texture(1000), "funnel_core")

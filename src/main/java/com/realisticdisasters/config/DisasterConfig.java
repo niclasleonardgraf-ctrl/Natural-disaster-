@@ -33,6 +33,18 @@ public final class DisasterConfig {
     public static final ModConfigSpec.BooleanValue TORNADO_CHANGES_WEATHER;
     public static final ModConfigSpec.ConfigValue<List<? extends String>> TORNADO_BIOMES;
 
+    // ---- wildfire ----
+    public static final ModConfigSpec.BooleanValue WILDFIRE_ENABLED;
+    public static final ModConfigSpec.IntValue WILDFIRE_WEIGHT;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> WILDFIRE_BIOMES;
+    public static final ModConfigSpec.DoubleValue WILDFIRE_DRY_BIOME_BONUS;
+    public static final ModConfigSpec.IntValue WILDFIRE_MAX_IGNITIONS_PER_TICK;
+    public static final ModConfigSpec.IntValue WILDFIRE_MAX_AREA;
+    public static final ModConfigSpec.DoubleValue WILDFIRE_SPREAD_SCALE;
+    public static final ModConfigSpec.DoubleValue WILDFIRE_DURATION_SCALE;
+    public static final ModConfigSpec.BooleanValue WILDFIRE_RAIN_SLOWS;
+    public static final ModConfigSpec.BooleanValue WILDFIRE_REGROWTH;
+
     static {
         B.push("general");
         NATURAL_SPAWNING = B.comment("Whether disasters start naturally near players.")
@@ -78,6 +90,33 @@ public final class DisasterConfig {
                         "minecraft:meadow", "minecraft:forest", "minecraft:birch_forest", "minecraft:flower_forest",
                         "minecraft:swamp", "minecraft:badlands", "minecraft:wooded_badlands"),
                         () -> "minecraft:plains", o -> o instanceof String);
+        B.pop();
+
+        B.push("wildfire");
+        WILDFIRE_ENABLED = B.define("enabled", true);
+        WILDFIRE_WEIGHT = B.comment("Relative weight when picking a natural disaster (before the dry-biome bonus).")
+                .defineInRange("weight", 10, 0, 1000);
+        WILDFIRE_BIOMES = B.comment("Biomes (ids or #tags) where wildfires can start naturally.")
+                .defineListAllowEmpty("biomes", List.of(
+                        "#minecraft:is_savanna", "#minecraft:is_forest", "#minecraft:is_taiga",
+                        "minecraft:plains", "minecraft:sunflower_plains", "minecraft:meadow",
+                        "minecraft:sparse_jungle", "minecraft:wooded_badlands", "minecraft:windswept_savanna"),
+                        () -> "minecraft:savanna", o -> o instanceof String);
+        WILDFIRE_DRY_BIOME_BONUS = B.comment("How much more likely wildfires are in hot, dry biomes. The weight is multiplied by up to (1 + bonus)",
+                        "for a hot biome without rain (savanna, badlands) and reduced for cold or wet ones. 0 = same everywhere.")
+                .defineInRange("dryBiomeBonus", 2.0, 0.0, 20.0);
+        WILDFIRE_MAX_IGNITIONS_PER_TICK = B.comment("Cap on new burning columns per tick per wildfire (block changes also go through the shared queue).")
+                .defineInRange("maxIgnitionsPerTick", 6, 1, 256);
+        WILDFIRE_MAX_AREA = B.comment("Max columns one wildfire may burn at intensity 5 (scaled down for lower intensities).")
+                .defineInRange("maxArea", 9000, 100, 200_000);
+        WILDFIRE_SPREAD_SCALE = B.comment("Multiplier for how fast the fire front advances.")
+                .defineInRange("spreadScale", 1.0, 0.1, 10.0);
+        WILDFIRE_DURATION_SCALE = B.comment("Multiplier for how long the fire keeps spreading (peak phase).")
+                .defineInRange("durationScale", 1.0, 0.1, 10.0);
+        WILDFIRE_RAIN_SLOWS = B.comment("Rain slows the fire front down and shortens burning.")
+                .define("rainSlows", true);
+        WILDFIRE_REGROWTH = B.comment("Scorched earth slowly weathers back into dirt (grass then regrows on it). Off = burn scars stay forever.")
+                .define("regrowth", true);
         B.pop();
     }
 
