@@ -32,6 +32,8 @@
   "subtitles.realisticdisasters.earthquake.rumble": "Ground rumbles and grinds",
   "subtitles.realisticdisasters.earthquake.distant": "Deep rumbling",
   "subtitles.realisticdisasters.earthquake.crack": "Rock cracks",
+  "subtitles.realisticdisasters.earthquake.boom": "Deep boom from below",
+  "subtitles.realisticdisasters.earthquake.collapse": "Structure collapses",
 
   "realisticdisasters.configuration.title": "Realistic Natural Disasters",
   "realisticdisasters.configuration.section.realisticdisasters.common.toml": "Disasters (server)",

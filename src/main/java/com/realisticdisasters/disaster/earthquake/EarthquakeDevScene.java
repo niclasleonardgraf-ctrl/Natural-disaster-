@@ -103,6 +103,34 @@ public final class EarthquakeDevScene {
             features.get(keys.get(Math.floorMod(t[0] + t[1], keys.size()))).ifPresent(f ->
                     f.value().place(level, level.getChunkSource().getGenerator(), level.getRandom(), at));
         }
+        // Wide hall (13 x 9, long roof span) next to the small houses: wide spans should fail first.
+        house(level, cx - 27, g + 1, cz - 8, 13, 9, Blocks.STONE_BRICKS.defaultBlockState());
+        // Free-standing chimney on the cobblestone house.
+        for (int y = g + 5; y <= g + 11; y++) level.setBlock(new BlockPos(cx - 13, y, cz - 3), Blocks.BRICKS.defaultBlockState(), 2);
+        // Steep hill behind the village for landslides: grass over dirt over stone, ~60 degree flanks.
+        int hx = cx + 30, hz = cz + 26;
+        for (int x = -9; x <= 9; x++)
+            for (int z = -9; z <= 9; z++) {
+                int h = (int) Math.round(15 - 1.75 * Math.sqrt(x * x + z * z));
+                for (int y = 1; y <= h; y++) {
+                    BlockState st = y == h ? grass : y > h - 3 ? dirt : Blocks.STONE.defaultBlockState();
+                    level.setBlock(new BlockPos(hx + x, g + y, hz + z), st, 2);
+                }
+            }
+        // Fixtures: doors in the doorways, hanging lanterns, wall torches, a bell on a post.
+        int[][] doors = {{cx - 14 + 3, cz - 4}, {cx + 3 + 4, cz - 14}, {cx + 9 + 3, cz + 1}, {cx - 6 + 3, cz + 13}, {cx - 27 + 6, cz - 8}};
+        for (int[] dd : doors) {
+            level.setBlock(new BlockPos(dd[0], g + 1, dd[1]), Blocks.OAK_DOOR.defaultBlockState(), 2);
+            level.setBlock(new BlockPos(dd[0], g + 2, dd[1]), Blocks.OAK_DOOR.defaultBlockState()
+                    .setValue(net.minecraft.world.level.block.DoorBlock.HALF, net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER), 2);
+            level.setBlock(new BlockPos(dd[0], g + 4, dd[1] + 2), Blocks.LANTERN.defaultBlockState()
+                    .setValue(net.minecraft.world.level.block.LanternBlock.HANGING, true), 2);
+            level.setBlock(new BlockPos(dd[0] + 1, g + 2, dd[1] - 1), Blocks.WALL_TORCH.defaultBlockState()
+                    .setValue(net.minecraft.world.level.block.WallTorchBlock.FACING, net.minecraft.core.Direction.NORTH), 2);
+        }
+        for (int y = g + 1; y <= g + 3; y++) level.setBlock(new BlockPos(cx + 2, y, cz + 6), Blocks.OAK_FENCE.defaultBlockState(), 2);
+        level.setBlock(new BlockPos(cx + 2, g + 4, cz + 6), Blocks.BELL.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.BellBlock.ATTACHMENT, net.minecraft.world.level.block.state.properties.BellAttachType.FLOOR), 2);
         // Viewer: just inside the zone, slightly raised, looking across the village toward the epicentre.
         double px = cx - 30.5, pz = cz - 26.5;
         for (int y = g + 1; y <= g + 3; y++) level.setBlock(new BlockPos(Mth.floor(px), y, Mth.floor(pz)), Blocks.STONE.defaultBlockState(), 2);

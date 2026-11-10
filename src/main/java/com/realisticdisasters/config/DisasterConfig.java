@@ -94,7 +94,7 @@ public final class DisasterConfig {
         EARTHQUAKE_WEIGHT = B.comment("Relative weight when picking a natural disaster.")
                 .defineInRange("weight", 10, 0, 1000);
         EARTHQUAKE_MAX_DEBRIS = B.comment("Max falling-block debris entities per earthquake (scaled by intensity / 5).")
-                .defineInRange("maxDebris", 80, 0, 400);
+                .defineInRange("maxDebris", 120, 0, 400);
         EARTHQUAKE_DURATION_SCALE = B.comment("Multiplier for how long the main shock lasts.")
                 .defineInRange("durationScale", 1.0, 0.1, 10.0);
         EARTHQUAKE_FISSURES = B.comment("Whether fissures open in the ground (needs blockDestruction).")

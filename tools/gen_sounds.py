@@ -147,6 +147,46 @@ def quake_crack(rng, seconds=1.6):
     return normalize(x, 0.9)
 
 
+def quake_boom(rng, seconds=5.0):
+    """Earthquake boom: the deep thump people hear as the P-wave arrives, rolling into a low rumble."""
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    # Sub-bass thump: a sine sweeping down from ~55 Hz to ~28 Hz with a fast attack.
+    freq = 28 + 27 * np.exp(-t * 3.0)
+    phase = 2 * np.pi * np.cumsum(freq) / RATE
+    thump = np.sin(phase) * np.minimum(t / 0.02, 1) * np.exp(-t * 2.2)
+    body = fast_lowpass(rng.standard_normal(n), 90) * np.minimum(t / 0.05, 1) * np.exp(-t * 0.9)
+    crackle = bandpass(rng.standard_normal(n), 300, 2500) * np.exp(-t * 6) * 0.15
+    x = normalize(thump) * 1.0 + normalize(body) * 0.6 + normalize(crackle) * 0.25
+    return normalize(x, 0.95)
+
+
+def collapse_crash(rng, seconds=3.2):
+    """Structure collapse: heavy impact, breaking masonry, then a long tail of tumbling and settling debris."""
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    impact = fast_lowpass(rng.standard_normal(n), 180) * np.minimum(t / 0.01, 1) * np.exp(-t * 5)
+    crash = bandpass(rng.standard_normal(n), 400, 7000) * np.exp(-t * 3.5)
+    # Tumbling debris: many short knocks of varying size, thinning out over time.
+    debris = np.zeros(n)
+    for _ in range(int(rng.integers(70, 110))):
+        at = int(min(n - 1, rng.exponential(0.7) * RATE))
+        ln = int(rng.uniform(0.01, 0.05) * RATE)
+        seg = rng.standard_normal(min(ln, n - at)) * np.exp(-np.arange(min(ln, n - at)) / (0.008 * RATE))
+        debris[at:at + len(seg)] += seg * rng.uniform(0.2, 1.0)
+    debris = bandpass(debris, 150, 5000)
+    x = normalize(impact) * 0.9 + normalize(crash) * 0.55 + normalize(debris) * 0.7
+    return normalize(x, 0.95)
+
+
+def earthquake_cinematic_sounds():
+    """Boom and collapse crashes (own seed, so earlier files stay identical)."""
+    rng = np.random.default_rng(7331)
+    write_ogg("quake_boom", quake_boom(rng))
+    for i in range(1, 4):
+        write_ogg(f"collapse_crash{i}", collapse_crash(rng))
+
+
 def earthquake_sounds():
     """Writes only the earthquake files (own seed, so the tornado sounds are untouched)."""
     rng = np.random.default_rng(5150)
@@ -164,6 +204,7 @@ def main():
         write_ogg(f"rumble{i}", rumble(rng))
         write_ogg(f"wind_gust{i}", gust(rng))
     earthquake_sounds()
+    earthquake_cinematic_sounds()
 
 
 if __name__ == "__main__":

@@ -24,6 +24,8 @@ public final class ModRegistries {
     public static final DeferredHolder<SoundEvent, SoundEvent> QUAKE_RUMBLE = sound("disaster.earthquake.rumble");
     public static final DeferredHolder<SoundEvent, SoundEvent> QUAKE_DISTANT = sound("disaster.earthquake.distant");
     public static final DeferredHolder<SoundEvent, SoundEvent> QUAKE_CRACK = sound("disaster.earthquake.crack");
+    public static final DeferredHolder<SoundEvent, SoundEvent> QUAKE_BOOM = sound("disaster.earthquake.boom");
+    public static final DeferredHolder<SoundEvent, SoundEvent> COLLAPSE_CRASH = sound("disaster.earthquake.collapse");
 
     // Particles
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FUNNEL_CLOUD =

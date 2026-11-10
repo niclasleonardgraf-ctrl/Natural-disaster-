@@ -144,23 +144,45 @@ final class EarthquakePhysics {
 
     // ------------------------------------------------------------------ rigid toppling
 
+    /** Slender structures found by the sampler (top position -> free-standing height), re-checked every second. */
+    private final java.util.Map<BlockPos, Integer> towers = new java.util.HashMap<>();
+
     /**
      * Called for the top block of a column standing on something: if it's the top of a slender, free-standing
-     * structure (chimney, tower, pillar), it may snap and topple. Returns true if a topple was started.
+     * structure (chimney, tower, pillar), remember it. Such structures are the classic earthquake casualty.
      */
-    boolean considerTopple(BlockPos top, float chanceScale) {
-        if (intensity < 3 || topples >= intensity * 2) return false;
-        if (random.nextFloat() > 0.06f * quake.tremor() * chanceScale * (intensity - 2)) return false;
+    void noteColumnTop(BlockPos top) {
+        if (intensity < 3 || towers.size() >= 48 || towers.containsKey(top)) return;
+        int open = 0;
+        for (Direction dir : Direction.Plane.HORIZONTAL) if (!EarthquakeDisaster.solid(level.getBlockState(top.relative(dir)))) open++;
+        if (open < 2) return; // cheap pre-filter: flat roofs and wall tops are not towers
         int free = freeStandingHeight(top);
-        if (free < 4 || random.nextFloat() > free / 10f) return false;
-        // Masonry snaps somewhere in the lower part of its free height; the part above falls as one piece.
-        int breakY = top.getY() - free + 1 + random.nextInt(Math.max(1, free / 3));
-        List<BlockPos> body = gather(top, breakY, 2, 220, false);
-        if (body.size() < 3) return false;
-        Vec3 dir = fallDirection(top);
-        topples++;
-        DisasterManager.blockQueue(level).add(l -> topple(body, breakY, dir, top));
-        return true;
+        if (free >= 4) towers.put(top.immutable(), free);
+    }
+
+    /** Every second, each known tower may snap and topple; taller and stronger shaking means more likely. */
+    void tickTowers() {
+        if (towers.isEmpty() || quake.age() % 20 != 0 || topples >= intensity * 3) return;
+        var it = towers.entrySet().iterator();
+        while (it.hasNext()) {
+            var e = it.next();
+            BlockPos top = e.getKey();
+            if (!level.isLoaded(top) || !EarthquakeDisaster.solid(level.getBlockState(top))) {
+                it.remove();
+                continue;
+            }
+            int free = e.getValue();
+            float p = 0.12f * quake.tremor() * (intensity - 2) * Math.min(1.5f, free / 8f);
+            if (random.nextFloat() > p) continue;
+            it.remove();
+            // Masonry snaps somewhere in the lower part of its free height; the part above falls as one piece.
+            int breakY = top.getY() - free + 1 + random.nextInt(Math.max(1, free / 3));
+            List<BlockPos> body = gather(top, breakY, 2, 220, false);
+            if (body.size() < 3) continue;
+            Vec3 dir = fallDirection(top);
+            topples++;
+            DisasterManager.blockQueue(level).add(l -> topple(body, breakY, dir, top));
+        }
     }
 
     /** Topples the slender structure whose top is {@code top} right now, in {@code dir} (tests / admin use). */

@@ -49,6 +49,14 @@ public final class EarthquakeVisual implements DisasterVisual {
         int nextCrack = 10;
         int nextCreak = 30;
         final java.util.Map<Integer, Falling> falling = new java.util.HashMap<>();
+        // cinematic beats
+        Phase lastPhase;
+        int boomIn = -1;
+        boolean sArrived, waveHitViewer;
+        float wave = -1f;
+        long ticks;
+        int impactSounds;
+        final java.util.Map<Long, long[]> landingCells = new java.util.HashMap<>(); // cell -> {count, firstTick, lastCrash}
     }
 
     public static float radius(ClientDisaster d) {
@@ -104,8 +112,75 @@ public final class EarthquakeVisual implements DisasterVisual {
         State st = d.visualState instanceof State s ? s : new State();
         d.visualState = st;
         Vec3 cam = camera.position();
+        st.ticks++;
+        st.impactSounds = 0;
         tickSounds(d, st, cam);
+        tickBeats(d, st, level, camera, cam);
         spawnParticles(d, st, level, camera, cam);
+        st.lastPhase = d.phase;
+    }
+
+    /**
+     * The big moments: the P-wave boom (heard first, later the further away you are) and the S-wave front, a ring of
+     * dust sweeping outward over the land that hits the camera as it passes you.
+     */
+    private void tickBeats(ClientDisaster d, State st, ClientLevel level, Camera camera, Vec3 cam) {
+        Minecraft mc = Minecraft.getInstance();
+        double dist = horizontalDistance(d, cam);
+        float radius = radius(d);
+        if (st.lastPhase == Phase.WARNING && d.phase == Phase.BUILDUP) st.boomIn = (int) (dist / 30);
+        if (st.boomIn >= 0 && st.boomIn-- == 0) {
+            float near = 1f - smoothstep(radius, radius * 6f + 200f, (float) dist);
+            if (near > 0.02f) {
+                Vec3 dir = d.pos().subtract(cam);
+                Vec3 at = cam.add(dir.lengthSqr() < 1 ? Vec3.ZERO : dir.normalize().scale(Math.min(dir.length(), 16)));
+                mc.getSoundManager().play(new SimpleSoundInstance(ModRegistries.QUAKE_BOOM.get().location(), SoundSource.WEATHER,
+                        (0.6f + 0.1f * d.intensity) * near, 0.9f + RANDOM.nextFloat() * 0.15f, RANDOM, false, 0,
+                        SoundInstance.Attenuation.NONE, at.x, at.y - 4, at.z, false));
+                EarthquakeCamera.impact(0.35f * near);
+            }
+        }
+        if (!st.sArrived && d.phase == Phase.BUILDUP && tremor(d) > 0.4f) {
+            st.sArrived = true;
+            st.wave = 0f;
+        }
+        if (st.wave < 0f) return;
+        st.wave += 1.6f; // ~32 blocks/s: a visible front rather than the real (much faster) wave speed
+        float limit = (float) Math.min(radius * 3f, dist + 160);
+        if (st.wave > limit) {
+            st.wave = -1f;
+            return;
+        }
+        if (!st.waveHitViewer && Math.abs(dist - st.wave) < 1.7f) {
+            st.waveHitViewer = true;
+            float hit = 1f - smoothstep(radius * 0.3f, radius * 2.5f, (float) dist);
+            EarthquakeCamera.impact(0.25f + 0.6f * hit);
+        }
+        float density = ClientConfig.PARTICLE_DENSITY.get().floatValue() * switch (mc.options.particles().get()) {
+            case ALL -> 1f;
+            case DECREASED -> 0.5f;
+            case MINIMAL -> 0.2f;
+        };
+        if (density <= 0) return;
+        Frustum frustum = camera.getCullFrustum();
+        Vec3 c = d.pos();
+        int points = count(90 * density * (0.6f + 0.1f * d.intensity));
+        double toViewer = Math.atan2(cam.z - c.z, cam.x - c.x);
+        for (int i = 0; i < points; i++) {
+            // Most of the budget goes to the part of the front the viewer can see (the arc facing them).
+            double a = RANDOM.nextFloat() < 0.75f ? toViewer + (RANDOM.nextDouble() - 0.5) * 1.6 : RANDOM.nextDouble() * Math.PI * 2;
+            double x = c.x + Math.cos(a) * st.wave, z = c.z + Math.sin(a) * st.wave;
+            if (sq(x - cam.x) + sq(z - cam.z) > 120 * 120) continue;
+            BlockState ground = groundAt(level, x, z);
+            if (ground == null || !looseGround(ground) && RANDOM.nextFloat() > 0.6f) continue;
+            int ix = Mth.floor(x), iz = Mth.floor(z);
+            int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, ix, iz);
+            if (frustum != null && !frustum.isVisible(new AABB(x - 2, y - 1, z - 2, x + 2, y + 3, z + 2))) continue;
+            // The front kicks dust up and outward as it rolls past.
+            level.addParticle(ModRegistries.QUAKE_DUST.get(), true, true, x, y + 0.2, z,
+                    Math.cos(a) * 0.09, 0.05 + RANDOM.nextDouble() * 0.08, Math.sin(a) * 0.09);
+            if (RANDOM.nextFloat() < 0.3f) spawnChip(level, x, z, 0.3);
+        }
     }
 
     private void spawnParticles(ClientDisaster d, State st, ClientLevel level, Camera camera, Vec3 cam) {
@@ -229,6 +304,7 @@ public final class EarthquakeVisual implements DisasterVisual {
             if (seen.contains(e.getKey())) continue;
             it.remove();
             Falling f = e.getValue();
+            landed(st, f, cam);
             if (cam.distanceToSqr(f.pos) > 128 * 128) continue;
             if (frustum != null && !frustum.isVisible(new AABB(f.pos.x - 4, f.pos.y - 1, f.pos.z - 4, f.pos.x + 4, f.pos.y + 4, f.pos.z + 4))) continue;
             // Masonry and soil make far more dust than wood. A collapse cloud billows up and rolls outward low and
@@ -247,6 +323,36 @@ public final class EarthquakeVisual implements DisasterVisual {
                         (RANDOM.nextDouble() - 0.5) * 0.3, 0.1 + RANDOM.nextDouble() * 0.25, (RANDOM.nextDouble() - 0.5) * 0.3);
             }
         }
+    }
+
+    /**
+     * Sound of debris landing: each block thuds with its own material's sound, and where several land close together
+     * a heavy collapse crash plays. A big collapse near the viewer also jolts the camera.
+     */
+    private static void landed(State st, Falling f, Vec3 cam) {
+        Minecraft mc = Minecraft.getInstance();
+        double d2 = cam.distanceToSqr(f.pos);
+        if (d2 < 40 * 40 && st.impactSounds < 6 && mc.level != null) {
+            st.impactSounds++;
+            var type = f.state.getSoundType();
+            mc.level.playLocalSound(f.pos.x, f.pos.y, f.pos.z, type.getBreakSound(), SoundSource.BLOCKS,
+                    0.6f + RANDOM.nextFloat() * 0.3f, type.getPitch() * (0.6f + RANDOM.nextFloat() * 0.2f), false);
+        }
+        long key = BlockPos.asLong(Mth.floor(f.pos.x) >> 3, Mth.floor(f.pos.y) >> 3, Mth.floor(f.pos.z) >> 3);
+        long[] cell = st.landingCells.computeIfAbsent(key, k -> new long[]{0, st.ticks, -1000});
+        if (st.ticks - cell[1] > 40) {
+            cell[0] = 0;
+            cell[1] = st.ticks;
+        }
+        cell[0]++;
+        if (cell[0] >= 4 && st.ticks - cell[2] > 50 && d2 < 160 * 160) {
+            cell[2] = st.ticks;
+            mc.getSoundManager().play(new SimpleSoundInstance(ModRegistries.COLLAPSE_CRASH.get().location(), SoundSource.BLOCKS,
+                    Math.min(4f, 1.6f + cell[0] * 0.15f), 0.8f + RANDOM.nextFloat() * 0.2f, RANDOM, false, 0,
+                    SoundInstance.Attenuation.LINEAR, f.pos.x, f.pos.y, f.pos.z, false));
+            if (d2 < 24 * 24) EarthquakeCamera.impact(0.3f);
+        }
+        if (st.landingCells.size() > 256) st.landingCells.entrySet().removeIf(e -> st.ticks - e.getValue()[1] > 200);
     }
 
     /** Leaves shaken out of trees and water slopping about in ponds near the viewer. */

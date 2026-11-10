@@ -30,5 +30,17 @@
       { "name": "realisticdisasters:quake_crack2", "attenuation_distance": 48 },
       { "name": "realisticdisasters:quake_crack3", "attenuation_distance": 48 }
     ]
+  },
+  "disaster.earthquake.boom": {
+    "subtitle": "subtitles.realisticdisasters.earthquake.boom",
+    "sounds": [{ "name": "realisticdisasters:quake_boom" }]
+  },
+  "disaster.earthquake.collapse": {
+    "subtitle": "subtitles.realisticdisasters.earthquake.collapse",
+    "sounds": [
+      { "name": "realisticdisasters:collapse_crash1", "attenuation_distance": 64 },
+      { "name": "realisticdisasters:collapse_crash2", "attenuation_distance": 64 },
+      { "name": "realisticdisasters:collapse_crash3", "attenuation_distance": 64 }
+    ]
   }
 }

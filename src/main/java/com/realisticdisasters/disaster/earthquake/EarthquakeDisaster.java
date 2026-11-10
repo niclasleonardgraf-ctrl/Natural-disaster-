@@ -205,6 +205,7 @@ public class EarthquakeDisaster extends Disaster {
             growFissures();
             physics.tickSlides();
             physics.tickTopples();
+            physics.tickTowers();
             processSupportChecks();
             sweepCanopies();
         }
@@ -609,8 +610,26 @@ public class EarthquakeDisaster extends Disaster {
             return;
         }
 
-        // Top of a free-standing column (chimney, tower, pillar): it may snap and topple as one piece.
-        if (!terrain(st) && !solid(level.getBlockState(bp.above())) && physics.considerTopple(bp, chanceScale)) return;
+        // Top of a free-standing column (chimney, tower, pillar): remembered, it may snap and topple as one piece.
+        if (!terrain(st) && !solid(level.getBlockState(bp.above()))) physics.noteColumnTop(bp);
+
+        // Unreinforced masonry walls fail first: blocks are shaken out of thin walls at any height (out-of-plane
+        // failure); what's above then has to find a load path or comes down too. Timber framing is far more forgiving.
+        if (intensity >= 3 && !terrain(st) && !terrain(below)) {
+            boolean ns = !solid(level.getBlockState(bp.north())) && !solid(level.getBlockState(bp.south()));
+            boolean ew = !solid(level.getBlockState(bp.east())) && !solid(level.getBlockState(bp.west()));
+            if (ns != ew) {
+                boolean masonry = hardness >= 1.5f && st.getSoundType() != SoundType.WOOD;
+                float p = (masonry ? 0.02f : 0.004f) * (intensity - 2) * tremor * chanceScale;
+                if (random.nextFloat() < p) {
+                    Direction out = ns ? (random.nextBoolean() ? Direction.NORTH : Direction.SOUTH)
+                            : (random.nextBoolean() ? Direction.EAST : Direction.WEST);
+                    Vec3 push = new Vec3(out.getStepX() * 0.14, 0.05, out.getStepZ() * 0.14);
+                    DisasterManager.blockQueue(level).add(l -> collapse(bp, st, push));
+                    return;
+                }
+            }
+        }
 
         // Walls shed their top courses: loose blocks with a free side get thrown off. Only real wall tops (sitting on
         // more masonry / wood, not rubble lying on the ground).

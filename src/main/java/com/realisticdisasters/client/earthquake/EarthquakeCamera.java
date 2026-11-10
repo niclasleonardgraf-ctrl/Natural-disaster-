@@ -42,6 +42,15 @@ public final class EarthquakeCamera {
     // resulting motion this tick and last tick (render interpolates)
     private static final float[] cur = new float[CH], prev = new float[CH];
 
+    // impacts: a sharp kick into the strong-motion channel plus a short zoom punch (FOV), easing back out
+    private static float kick, punch, prevPunch;
+
+    /** A wave front or a big collapse hits the viewer (0..1). */
+    static void impact(float strength) {
+        kick = Math.max(kick, strength);
+        punch = Math.max(punch, Math.min(1f, strength));
+    }
+
     /** Called by {@link EarthquakeVisual#contribute} every client tick. dir = horizontal unit vector away from the epicentre. */
     static void add(float joltAmount, float rollAmount, double dx, double dz) {
         joltIn += joltAmount;
@@ -55,6 +64,10 @@ public final class EarthquakeCamera {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || mc.isPaused()) return;
         System.arraycopy(cur, 0, prev, 0, CH);
+        prevPunch = punch;
+        punch *= 0.86f;
+        joltIn += kick;
+        kick = 0;
 
         // Fast attack (jolts hit at once), slower release (motion rings out).
         jolt += (Math.min(joltIn, 1.3f) - jolt) * (joltIn > jolt ? 0.6f : 0.1f);
@@ -145,8 +158,18 @@ public final class EarthquakeCamera {
         event.setRoll(event.getRoll() + value(ROLL, pt) * s);
     }
 
+    /** Impact punch: the view snaps in a few percent and eases back, like a camera operator flinching. */
+    @SubscribeEvent
+    public static void onComputeFov(ViewportEvent.ComputeFov event) {
+        if (!ClientConfig.FOV_PULSE.getAsBoolean() || strength() <= 0f) return;
+        float p = Mth.lerp((float) event.getPartialTick(), prevPunch, punch);
+        if (p < 0.005f) return;
+        event.setFOV(event.getFOV() * (1f - 0.06f * p * Math.min(1f, strength())));
+    }
+
     @SubscribeEvent
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut event) {
+        kick = punch = prevPunch = 0;
         joltIn = rollIn = dirXIn = dirZIn = jolt = roll = 0;
         java.util.Arrays.fill(cur, 0f);
         java.util.Arrays.fill(prev, 0f);
