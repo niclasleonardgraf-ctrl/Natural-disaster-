@@ -2,6 +2,12 @@
   "disaster.realisticdisasters.tornado": "Tornado",
   "disaster.realisticdisasters.tornado.warning": "The sky turns a sickly green... a storm is organising nearby.",
   "disaster.realisticdisasters.tornado.touchdown": "A funnel is reaching for the ground! Take shelter!",
+  "disaster.realisticdisasters.blizzard": "Blizzard",
+  "disaster.realisticdisasters.blizzard.warning": "The wind picks up and the horizon turns white... a blizzard is coming.",
+  "disaster.realisticdisasters.blizzard.onset": "White-out! Get indoors or wear leather before the cold sets in!",
+  "disaster.realisticdisasters.sandstorm": "Sandstorm",
+  "disaster.realisticdisasters.sandstorm.warning": "A brown wall is rising on the horizon... a sandstorm is coming.",
+  "disaster.realisticdisasters.sandstorm.onset": "The sandstorm is here! Find shelter and cover your head!",
 
   "phase.realisticdisasters.warning": "Warning",
   "phase.realisticdisasters.buildup": "Buildup",
@@ -19,11 +25,20 @@
 
   "death.attack.realisticdisasters.tornado": "%1$s was swept away by a tornado",
   "death.attack.realisticdisasters.tornado.player": "%1$s was swept away by a tornado while fighting %2$s",
+  "death.attack.realisticdisasters.sandstorm": "%1$s was scoured by a sandstorm",
+  "death.attack.realisticdisasters.sandstorm.player": "%1$s was scoured by a sandstorm while fighting %2$s",
+
+  "block.realisticdisasters.sand_layer": "Sand Layer",
+  "block.realisticdisasters.red_sand_layer": "Red Sand Layer",
 
   "subtitles.realisticdisasters.tornado.roar": "Tornado roars",
   "subtitles.realisticdisasters.tornado.distant": "Distant rumbling wind",
   "subtitles.realisticdisasters.rumble": "Distant rumble",
   "subtitles.realisticdisasters.wind_gust": "Wind gusts",
+  "subtitles.realisticdisasters.blizzard.howl": "Blizzard howls",
+  "subtitles.realisticdisasters.blizzard.distant": "Distant moaning wind",
+  "subtitles.realisticdisasters.sandstorm.howl": "Sandstorm hisses",
+  "subtitles.realisticdisasters.sandstorm.distant": "Distant roaring wind",
 
   "realisticdisasters.configuration.title": "Realistic Natural Disasters",
   "realisticdisasters.configuration.section.realisticdisasters.common.toml": "Disasters (server)",
@@ -33,6 +48,8 @@
   "realisticdisasters.configuration.general": "General",
   "realisticdisasters.configuration.destruction": "Destruction & protection",
   "realisticdisasters.configuration.tornado": "Tornado",
+  "realisticdisasters.configuration.blizzard": "Blizzard",
+  "realisticdisasters.configuration.sandstorm": "Sandstorm",
   "realisticdisasters.configuration.camera": "Camera",
   "realisticdisasters.configuration.visuals": "Visuals"
 }

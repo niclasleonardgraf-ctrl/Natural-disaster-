@@ -10,7 +10,8 @@ Full design spec: [`docs/SPEC.md`](docs/SPEC.md).
 | Disaster | State |
 |---|---|
 | Tornado | ✅ complete |
-| Earthquake, Wildfire, Volcano, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
+| Blizzard / Sandstorm | ✅ complete (shared wind-storm base) |
+| Earthquake, Wildfire, Volcano, Meteor shower, Tsunami/flood | planned (next sessions, in this order) |
 
 ## Commands (op level 2)
 
@@ -29,6 +30,20 @@ Full design spec: [`docs/SPEC.md`](docs/SPEC.md).
    **aftermath** (~16 s: the funnel ropes out and the sky clears).
 4. Stand near the funnel to feel the pull, lift, camera shake and FOV pulse. Afterwards you'll find a track of scoured dirt and scattered debris.
 5. `/disaster stop` lets it dissipate.
+
+## Testing a blizzard or sandstorm in-game
+
+1. `./gradlew runClient`, create a world with cheats on. A snowy biome suits the blizzard, a desert or badlands the sandstorm.
+2. `/disaster start blizzard 3` or `/disaster start sandstorm 3`. The storm is a wide disc (radius 56–120 blocks)
+   centred 48 blocks in front of you, so you're usually inside it.
+3. Phases: **warning** (~20 s: the sky turns white or dusty orange, a distant moaning wind, animals look for a roof,
+   villagers go inside), **buildup** (~20 s: fog thickens, sideways snow or sand, gusts), **peak** (80–160 s), **aftermath** (~20 s).
+4. Walk into the wind: you're slowed and pushed back. With the wind you speed up. Under a roof the wind stops,
+   the fog thins and the howl is muffled. In a blizzard you slowly freeze outside (leather armour protects). At
+   intensity ≥ 3 a sandstorm hurts you if you're outside without a helmet.
+5. Afterwards the land is buried: snow layers (and ice on still water) after a blizzard, sand or red-sand layers
+   after a sandstorm, with deeper drifts and full-block sand piles against walls and in their lee.
+6. `/disaster stop` lets it die down. The new blocks `Sand Layer` / `Red Sand Layer` are in the Natural Blocks tab.
 
 Shortcut for development: `./gradlew runClientVisualTest` loads the save `run/saves/VisualTest`, moves you onto a
 small pillar, plants a test forest and auto-starts an intensity-4 tornado at peak about 100 blocks away
@@ -54,6 +69,10 @@ large particles by their real size (vanilla culls by centre point). All quad par
 - `tornado_damages_terrain`: a pig gets lifted and the turf is scoured
 - `tornado_respects_block_toggle`: with `blockDestruction=false` no blocks change
 - `tornado_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.23 ms)
+- `blizzard_buries_and_pushes` / `sandstorm_buries_and_pushes`: an armour stand gets pushed downwind and snow / sand layers pile up
+- `blizzard_respects_block_toggle` / `sandstorm_respects_block_toggle`: with `blockDestruction=false` no blocks change
+- `blizzard_intensity3_tick_cost` / `sandstorm_intensity3_tick_cost`: below 2 ms/tick (measured ~0.9 / ~0.7 ms before halving the entity scan)
+- `sandstorm_builds_piles`: sand drifting against a wall settles into a full sand block, open ground only gets a thin layer
 
 ## Configuration
 
@@ -61,6 +80,8 @@ large particles by their real size (vanilla culls by centre point). All quad par
   max active disasters, sync range, block destruction on/off, block changes per tick, spawn-protection radius,
   claim-mod respect, extra protected areas (`"dimension,x,z,radius"`), and per-disaster enable / weight / biomes.
   The tornado section also has max debris, duration scale, and whether it changes the weather.
+  The blizzard section has duration scale, snow rate and whether it starts precipitation; the sandstorm section has
+  duration scale and sand rate.
 - `config/realisticdisasters-client.toml`: camera shake on/off and strength, FOV pulse, particle density, fog, sky tint.
   Also editable in-game: Mods → Realistic Natural Disasters → Config.
 
@@ -73,6 +94,9 @@ common (server-safe)
   disaster/DisasterProtection  config + spawn radius + protected areas + claim mods
   disaster/DisasterType      registry of kinds (factory, enable flag, weight, biomes)
   disaster/tornado/TornadoDisaster
+  disaster/windstorm/        WindStormDisaster (wind vector, gusts, push, shelter-seeking, batched accumulation)
+                             → BlizzardDisaster, SandstormDisaster
+  block/SandLayerBlock       snow-layer-shaped sand / red sand that never melts
   network/                   DisasterSyncPayload (every 4 ticks), DisasterRemovePayload
   command/DisasterCommand, config/, registry/ModRegistries (sounds, particles, damage type key)
 client (Dist.CLIENT only)
@@ -80,11 +104,14 @@ client (Dist.CLIENT only)
   EffectsManager             blends all disasters into sky/fog/cloud tint, fog distance, shake, FOV
   DisasterVisual(s)          per-type particles + sounds (tornado/TornadoVisual)
   particle/VortexParticle    funnel / debris / dust particles that orbit their disaster
+  particle/WindParticle      flakes / grains / haze that follow their storm's synced wind vector and gusts
+  windstorm/WindStormVisual  shared fog, particles, sounds → BlizzardVisual, SandstormVisual (palettes)
   sound/DisasterLoopSound    cross-fading positional (near) and non-attenuated (far) loops
 mixin/ClientLevelMixin       adds environment-attribute layers for sky, fog, cloud colour and sky light
 ```
 
-Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs numpy + ffmpeg) and `tools/gen_structures.py`.
+Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs numpy + ffmpeg), `tools/gen_structures.py`
+and `tools/gen_block_assets.py` (sand layer blockstates, models, loot tables).
 
 ## Design notes and deviations
 
@@ -101,6 +128,17 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
 - **Weather:** in the overworld a tornado starts rain (thunder at intensity ≥3) unless it's already thundering.
   Weather is global, so this affects the whole overworld.
 
+- **Wind storms** are wide discs that creep along with the wind. The wind direction and gust factor are synced to the
+  client (`WindStormDisaster.D_*`), so particles and pushes surge together. Only entities with open sky above them
+  are pushed, chilled or sand-blasted, and the push only accelerates them up to the wind's own speed.
+- **Sand layers** are a new block (vanilla has none). It reuses the snow-layer shapes with the vanilla sand textures.
+  When a drift reaches 8 layers it becomes a real sand / red sand block and the pile keeps growing while the drift lasts.
+  Badlands storms (or storms over red sand / terracotta) carry red sand.
+- **Mobs take shelter**: passive mobs pick a nearby standable spot with a roof over it. If there's none within 14
+  blocks they turn tail and drift downwind. Villagers use the bell signal, as with the tornado.
+- **Blizzard freezing** uses vanilla's frost (`ticksFrozen`), so leather armour protects, and freeze damage and the death
+  message are vanilla's. The blizzard starts precipitation, which is snow in cold biomes (global, like the tornado's weather).
+
 ## Known issues
 
 - Sound has not been heard-tested: the build container has no audio device. The sound files and their playback code
@@ -108,3 +146,8 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
 - The vortex is built from soft translucent particles. From inside the funnel, individual puffs can still be seen.
 - Vanilla rain (blue streaks) is unchanged; replacing it would mean overriding the vanilla rain texture for the whole game.
 - The weather change is global (vanilla limitation).
+- Wind-storm sounds haven't been heard-tested either (no audio device), for the same reason.
+- Fine snowflakes are white on white fog, so they mostly read as motion close to the camera. The haze puffs carry
+  most of the white-out.
+- Shelter-seeking is a short random search, not a real pathfinding query. In open terrain animals just drift downwind.
+- The GameTest arena structure logs a harmless `oak_leaves[persistent=true]` parse error (existing, from `gen_structures.py`).

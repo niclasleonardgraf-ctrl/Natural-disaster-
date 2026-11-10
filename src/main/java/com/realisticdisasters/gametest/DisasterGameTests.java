@@ -37,6 +37,13 @@ public final class DisasterGameTests {
         FUNCTIONS.register("tornado_damages_terrain", () -> DisasterGameTests::tornadoDamagesTerrain);
         FUNCTIONS.register("tornado_respects_block_toggle", () -> DisasterGameTests::tornadoRespectsBlockToggle);
         FUNCTIONS.register("tornado_intensity3_tick_cost", () -> DisasterGameTests::tornadoTickCost);
+        FUNCTIONS.register("blizzard_buries_and_pushes", () -> h -> WindStormGameTests.buriesAndPushes(h, DisasterType.BLIZZARD));
+        FUNCTIONS.register("blizzard_respects_block_toggle", () -> h -> WindStormGameTests.respectsBlockToggle(h, DisasterType.BLIZZARD));
+        FUNCTIONS.register("blizzard_intensity3_tick_cost", () -> h -> WindStormGameTests.tickCost(h, DisasterType.BLIZZARD));
+        FUNCTIONS.register("sandstorm_buries_and_pushes", () -> h -> WindStormGameTests.buriesAndPushes(h, DisasterType.SANDSTORM));
+        FUNCTIONS.register("sandstorm_respects_block_toggle", () -> h -> WindStormGameTests.respectsBlockToggle(h, DisasterType.SANDSTORM));
+        FUNCTIONS.register("sandstorm_intensity3_tick_cost", () -> h -> WindStormGameTests.tickCost(h, DisasterType.SANDSTORM));
+        FUNCTIONS.register("sandstorm_builds_piles", () -> WindStormGameTests::sandstormBuildsPiles);
     }
 
     public static void register(IEventBus modBus) {
@@ -49,6 +56,13 @@ public final class DisasterGameTests {
         add(event, "tornado_damages_terrain", event.registerEnvironment(ModRegistries.id("env_terrain")), 500);
         add(event, "tornado_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_toggle")), 300);
         add(event, "tornado_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_perf")), 400);
+        add(event, "blizzard_buries_and_pushes", event.registerEnvironment(ModRegistries.id("env_blizzard_effect")), 600);
+        add(event, "blizzard_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_blizzard_toggle")), 300);
+        add(event, "blizzard_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_blizzard_perf")), 400);
+        add(event, "sandstorm_buries_and_pushes", event.registerEnvironment(ModRegistries.id("env_sandstorm_effect")), 600);
+        add(event, "sandstorm_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_sandstorm_toggle")), 300);
+        add(event, "sandstorm_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_sandstorm_perf")), 400);
+        add(event, "sandstorm_builds_piles", event.registerEnvironment(ModRegistries.id("env_sandstorm_piles")), 100);
     }
 
     private static void add(RegisterGameTestsEvent event, String name, Holder<TestEnvironmentDefinition<?>> env, int maxTicks) {

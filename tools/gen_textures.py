@@ -192,6 +192,24 @@ def rain_shaft(seed, size=64):
     return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
 
 
+def soft_flake(seed, size=16, stretch=1.0, grain=False):
+    """Wind-blown snowflake / sand grain: a soft bright core with an alpha falloff. stretch > 1 smears it into a
+    horizontal motion streak (the particle is rolled to match the wind)."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    x = x + rng.uniform(-0.08, 0.08)
+    y = y + rng.uniform(-0.08, 0.08)
+    r = np.sqrt((x / stretch) ** 2 + y * y)
+    core = 0.35 if grain else 0.5
+    a = np.exp(-(r / core) ** 2 * 2.2)
+    n = fbm(size, rng, octaves=3, base=2)
+    a = np.clip(a * (0.75 + 0.5 * n), 0, 1)
+    light = np.clip(0.88 + 0.12 * (1 - r) + (0.1 * (n - 0.5) if grain else 0), 0, 1)
+    rgb = (light * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
+
+
 def write(img, name):
     os.makedirs(PARTICLES, exist_ok=True)
     img.save(os.path.join(PARTICLES, name + ".png"))
@@ -207,6 +225,11 @@ def main():
         write(soft_cloud(200 + i, density=0.85, wispy=True), f"dust_cloud_{i}")
         write(rain_shaft(400 + i), f"rain_shaft_{i}")
         write(debris_texture(300 + i), f"storm_debris_{i}")
+        # Wind storms (blizzard / sandstorm): near-white, tinted in code.
+        write(soft_flake(600 + i, stretch=1.0 + i * 0.9), f"blizzard_snow_{i}")
+        write(soft_cloud(700 + i, density=0.75, wispy=True), f"snow_haze_{i}")
+        write(soft_flake(800 + i, size=8, stretch=1.0 + i * 0.7, grain=True), f"sand_grain_{i}")
+        write(soft_cloud(900 + i, density=0.8, wispy=True), f"sand_haze_{i}")
 
     # 16x16 mod icon (tornado silhouette on a storm sky), upscaled with nearest neighbour for the mod list.
     icon = Image.new("RGBA", (16, 16), (78, 91, 71, 255))

@@ -14,5 +14,21 @@
   "disaster.wind_gust": {
     "subtitle": "subtitles.realisticdisasters.wind_gust",
     "sounds": ["realisticdisasters:wind_gust1", "realisticdisasters:wind_gust2", "realisticdisasters:wind_gust3"]
+  },
+  "disaster.blizzard.howl": {
+    "subtitle": "subtitles.realisticdisasters.blizzard.howl",
+    "sounds": [{ "name": "realisticdisasters:blizzard_howl", "stream": true }]
+  },
+  "disaster.blizzard.distant": {
+    "subtitle": "subtitles.realisticdisasters.blizzard.distant",
+    "sounds": [{ "name": "realisticdisasters:blizzard_distant", "stream": true }]
+  },
+  "disaster.sandstorm.howl": {
+    "subtitle": "subtitles.realisticdisasters.sandstorm.howl",
+    "sounds": [{ "name": "realisticdisasters:sandstorm_howl", "stream": true }]
+  },
+  "disaster.sandstorm.distant": {
+    "subtitle": "subtitles.realisticdisasters.sandstorm.distant",
+    "sounds": [{ "name": "realisticdisasters:sandstorm_distant", "stream": true }]
   }
 }

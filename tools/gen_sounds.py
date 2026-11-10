@@ -108,6 +108,60 @@ def gust(rng, seconds=3.0):
     return normalize(x * env, 0.7)
 
 
+def howl_tone(n, rng, base, spread, rate):
+    """A wind 'whistle': a sine whose pitch wanders slowly, faded in and out by smooth noise."""
+    freq = base + spread * (smooth_noise(n, rate, rng) - 0.5) * 2
+    phase = 2 * np.pi * np.cumsum(freq) / RATE
+    tone = np.sin(phase) + 0.3 * np.sin(phase * 2.01)
+    return tone * smooth_noise(n, rate * 1.7, rng) ** 2
+
+
+def blizzard_howl(rng, seconds=10.0):
+    """Close blizzard layer: rushing mid-band noise with ghostly wandering whistles riding on top."""
+    n = int(seconds * RATE)
+    white = rng.standard_normal(n)
+    rush = bandpass(white, 300, 2600) * (0.5 + 0.5 * smooth_noise(n, 0.9, rng))
+    hiss = bandpass(rng.standard_normal(n), 3000, 7000) * 0.12 * smooth_noise(n, 4, rng)
+    whistles = sum(howl_tone(n, rng, f, f * 0.25, 0.35) for f in (520, 760, 1100)) * 0.09
+    # resonant narrow bands give the "howl through gaps" colour
+    bands = sum(bandpass(rng.standard_normal(n), f * 0.92, f * 1.08) * smooth_noise(n, 0.6, rng) for f in (420, 640, 900)) * 0.9
+    x = rush * 0.9 + hiss + whistles * np.max(np.abs(rush)) + bands
+    return normalize(loopable(x, 0.8))
+
+
+def blizzard_distant(rng, seconds=12.0):
+    """Far blizzard layer: a low moaning wind with slow surges."""
+    n = int(seconds * RATE)
+    low = fast_lowpass(rng.standard_normal(n), 260)
+    moan = howl_tone(n, rng, 230, 60, 0.25) * 0.25 * np.std(low) * 3
+    x = (low + moan) * (0.55 + 0.45 * smooth_noise(n, 0.4, rng))
+    return normalize(loopable(x, 1.0), 0.85)
+
+
+def sandstorm_howl(rng, seconds=10.0):
+    """Close sandstorm layer: dry hissing grit over a roaring rush, surging in gusts, barely tonal."""
+    n = int(seconds * RATE)
+    roar = fast_lowpass(rng.standard_normal(n), 500)
+    grit = bandpass(rng.standard_normal(n), 2200, 8000)
+    # sand grains: sparse crackle bursts
+    crackle = bandpass(rng.standard_normal(n) * (rng.random(n) < 0.02), 3000, 9000) * 2.0
+    surge = 0.5 + 0.5 * smooth_noise(n, 0.8, rng)
+    whistle = howl_tone(n, rng, 340, 70, 0.3) * 0.05
+    x = (roar * 1.2 + grit * 0.45 * smooth_noise(n, 2.5, rng) + crackle * 0.3) * surge
+    x = x + whistle * np.max(np.abs(x))
+    return normalize(loopable(x, 0.8))
+
+
+def sandstorm_distant(rng, seconds=12.0):
+    """Far sandstorm layer: a deep dull roar, like a wall of wind rolling closer."""
+    n = int(seconds * RATE)
+    brown = np.cumsum(rng.standard_normal(n))
+    brown -= fast_lowpass(brown, 6)
+    x = fast_lowpass(brown, 220) + fast_lowpass(rng.standard_normal(n), 600) * 0.15
+    x *= 0.65 + 0.35 * smooth_noise(n, 0.5, rng)
+    return normalize(loopable(x, 1.0), 0.9)
+
+
 def main():
     rng = np.random.default_rng(1234)
     write_ogg("tornado_roar", tornado_roar(rng))
@@ -115,6 +169,11 @@ def main():
     for i in range(1, 4):
         write_ogg(f"rumble{i}", rumble(rng))
         write_ogg(f"wind_gust{i}", gust(rng))
+    storm_rng = np.random.default_rng(5678)  # separate stream: older sounds stay byte-identical
+    write_ogg("blizzard_howl", blizzard_howl(storm_rng))
+    write_ogg("blizzard_distant", blizzard_distant(storm_rng))
+    write_ogg("sandstorm_howl", sandstorm_howl(storm_rng))
+    write_ogg("sandstorm_distant", sandstorm_distant(storm_rng))
 
 
 if __name__ == "__main__":
