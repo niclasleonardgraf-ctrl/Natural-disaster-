@@ -364,11 +364,12 @@ public final class MeteorShowerVisual implements DisasterVisual {
             // Continuous incandescent wake: densely packed glows that cool from white to orange-red behind the head.
             int wake = Math.max(4, (int) Math.ceil(FLIGHT_SPEED / Math.max(0.2, core * 0.14)));
             for (int i = 0; i < wake; i++) {
-                // Random points along this tick's path (not evenly spaced): evenly spaced batches that age
-                // together read as a string of pearls, one per tick of travel.
-                Vec3 at = head.subtract(vel.scale(RANDOM.nextDouble())).add(jitter(core * 0.06));
-                glow(at, Vec3.ZERO, core * (0.75f + RANDOM.nextFloat() * 0.3f), 5 + RANDOM.nextInt(9), new float[]{1f, 0.93f, 0.75f},
-                        new float[]{0.85f, 0.3f, 0.1f}, 0.75f, 0.6f);
+                // Emitted at the head with a random fraction of the meteor's velocity: each glow falls behind at its
+                // own rate, so the wake is a continuous smear that interpolates between frames. (Glows placed along
+                // the path all share one age per tick and read as a string of pearls, one per tick of travel.)
+                Vec3 v = vel.scale(0.15 + RANDOM.nextDouble() * 0.8);
+                glow(head.add(jitter(core * 0.06)), v, core * (0.75f + RANDOM.nextFloat() * 0.3f), 5 + RANDOM.nextInt(9),
+                        new float[]{1f, 0.93f, 0.75f}, new float[]{0.85f, 0.3f, 0.1f}, 0.75f, 0.6f);
             }
             // Large coloured halo, inner halo, then the blinding white head on top.
             head(head, vel, core * 4.5f, m.halo, 0.3f);
