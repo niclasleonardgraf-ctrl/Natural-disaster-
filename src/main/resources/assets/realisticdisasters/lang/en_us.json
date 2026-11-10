@@ -2,6 +2,9 @@
   "disaster.realisticdisasters.tornado": "Tornado",
   "disaster.realisticdisasters.tornado.warning": "The sky turns a sickly green... a storm is organising nearby.",
   "disaster.realisticdisasters.tornado.touchdown": "A funnel is reaching for the ground! Take shelter!",
+  "disaster.realisticdisasters.earthquake": "Earthquake",
+  "disaster.realisticdisasters.earthquake.warning": "Animals are restless and the ground hums... a tremor runs beneath your feet.",
+  "disaster.realisticdisasters.earthquake.onset": "The ground heaves! Get out of buildings and away from cliffs!",
 
   "phase.realisticdisasters.warning": "Warning",
   "phase.realisticdisasters.buildup": "Buildup",
@@ -19,6 +22,8 @@
 
   "death.attack.realisticdisasters.tornado": "%1$s was swept away by a tornado",
   "death.attack.realisticdisasters.tornado.player": "%1$s was swept away by a tornado while fighting %2$s",
+  "death.attack.realisticdisasters.earthquake": "%1$s was shaken to pieces by an earthquake",
+  "death.attack.realisticdisasters.earthquake.player": "%1$s was shaken to pieces by an earthquake while fighting %2$s",
 
   "subtitles.realisticdisasters.tornado.roar": "Tornado roars",
   "subtitles.realisticdisasters.tornado.distant": "Distant rumbling wind",
@@ -29,6 +34,11 @@
   "subtitles.realisticdisasters.debris_thud": "Debris crashes",
   "subtitles.realisticdisasters.wood_snap": "Tree snaps",
   "subtitles.realisticdisasters.debris_rattle": "Debris rattles",
+  "subtitles.realisticdisasters.earthquake.rumble": "Ground rumbles and grinds",
+  "subtitles.realisticdisasters.earthquake.distant": "Deep rumbling",
+  "subtitles.realisticdisasters.earthquake.crack": "Rock cracks",
+  "subtitles.realisticdisasters.earthquake.boom": "Deep boom from below",
+  "subtitles.realisticdisasters.earthquake.collapse": "Structure collapses",
 
   "realisticdisasters.configuration.title": "Realistic Natural Disasters",
   "realisticdisasters.configuration.section.realisticdisasters.common.toml": "Disasters (server)",
@@ -38,6 +48,7 @@
   "realisticdisasters.configuration.general": "General",
   "realisticdisasters.configuration.destruction": "Destruction & protection",
   "realisticdisasters.configuration.tornado": "Tornado",
+  "realisticdisasters.configuration.earthquake": "Earthquake",
   "realisticdisasters.configuration.camera": "Camera",
   "realisticdisasters.configuration.visuals": "Visuals"
 }

@@ -88,5 +88,45 @@ def arena():
     write_structure("tornado_arena", (sx, sy, sz), blocks)
 
 
+def earthquake_arena():
+    """40x20x40: deep ground (fissures need depth), a cobblestone house with a plank roof and windows,
+    a stone-brick pillar and a plank overhang - things an earthquake can crack, shatter and bring down."""
+    sx, sy, sz = 40, 20, 40
+    blocks = {}
+    for x in range(sx):
+        for z in range(sz):
+            for y in range(0, 7):
+                blocks[(x, y, z)] = "minecraft:stone"
+            blocks[(x, 7, z)] = "minecraft:dirt"
+            blocks[(x, 8, z)] = "minecraft:dirt"
+            blocks[(x, 9, z)] = "minecraft:grass_block"
+    # house: walls x/z 24..30, y 10..13, flat plank roof at y 14
+    for x in range(24, 31):
+        for z in range(24, 31):
+            blocks[(x, 9, z)] = "minecraft:dirt"
+            for y in range(10, 14):
+                if x in (24, 30) or z in (24, 30):
+                    blocks[(x, y, z)] = "minecraft:cobblestone"
+            blocks[(x, 14, z)] = "minecraft:oak_planks"
+    for (x, z) in ((27, 24), (27, 30), (24, 27), (30, 27)):
+        blocks[(x, 11, z)] = "minecraft:glass"
+        blocks[(x, 12, z)] = "minecraft:glass"
+    # stone-brick pillar
+    for y in range(10, 16):
+        blocks[(12, y, 12)] = "minecraft:stone_bricks"
+        blocks[(13, y, 12)] = "minecraft:stone_bricks"
+    # plank overhang on a cobblestone post
+    for y in range(10, 13):
+        blocks[(8, y, 26)] = "minecraft:cobblestone"
+    for x in range(8, 13):
+        blocks[(x, 13, 26)] = "minecraft:oak_planks"
+    for x in range(sx):
+        for y in range(10, sy):
+            for z in range(sz):
+                blocks.setdefault((x, y, z), "minecraft:air")
+    write_structure("earthquake_arena", (sx, sy, sz), blocks)
+
+
 if __name__ == "__main__":
     arena()
+    earthquake_arena()
