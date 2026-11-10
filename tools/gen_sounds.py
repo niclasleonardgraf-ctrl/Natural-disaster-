@@ -108,6 +108,54 @@ def gust(rng, seconds=3.0):
     return normalize(x * env, 0.7)
 
 
+def quake_rumble(rng, seconds=9.0):
+    """Earthquake close layer: deep grinding rumble with rattling debris and irregular jolts."""
+    n = int(seconds * RATE)
+    brown = np.cumsum(rng.standard_normal(n))
+    brown -= fast_lowpass(brown, 6)
+    sub = fast_lowpass(brown, 90)
+    grind = bandpass(rng.standard_normal(n), 120, 600) * 0.35 * smooth_noise(n, 3, rng)
+    rattle = bandpass(rng.standard_normal(n), 900, 3500) * 0.06 * (smooth_noise(n, 9, rng) ** 3)
+    jolts = 0.6 + 0.4 * smooth_noise(n, 1.6, rng) ** 2
+    x = (normalize(sub) * 1.0 + normalize(grind) * 0.45 + normalize(rattle) * 0.18) * jolts
+    return normalize(loopable(x))
+
+
+def quake_distant(rng, seconds=10.0):
+    """Earthquake far layer: very low, slowly swelling rumble felt more than heard."""
+    n = int(seconds * RATE)
+    brown = np.cumsum(rng.standard_normal(n))
+    brown -= fast_lowpass(brown, 5)
+    x = fast_lowpass(brown, 70)
+    x *= 0.55 + 0.45 * smooth_noise(n, 0.4, rng)
+    return normalize(loopable(x), 0.9)
+
+
+def quake_crack(rng, seconds=1.6):
+    """Rock cracking one-shot: a sharp broadband snap, a few splintering ticks and a short low thud."""
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    snap = bandpass(rng.standard_normal(n), 300, 6000) * np.exp(-t * 28)
+    ticks = np.zeros(n)
+    for _ in range(rng.integers(4, 9)):
+        at = int(rng.uniform(0.02, 0.5) * RATE)
+        ln = int(0.03 * RATE)
+        ticks[at:at + ln] += rng.standard_normal(min(ln, n - at)) * np.exp(-np.arange(min(ln, n - at)) / (0.006 * RATE)) * rng.uniform(0.3, 0.8)
+    ticks = bandpass(ticks, 800, 7000)
+    thud = fast_lowpass(rng.standard_normal(n), 150) * np.exp(-t * 6) * np.minimum(t / 0.01, 1)
+    x = normalize(snap) + normalize(ticks) * 0.5 + normalize(thud) * 0.8
+    return normalize(x, 0.9)
+
+
+def earthquake_sounds():
+    """Writes only the earthquake files (own seed, so the tornado sounds are untouched)."""
+    rng = np.random.default_rng(5150)
+    write_ogg("quake_rumble", quake_rumble(rng))
+    write_ogg("quake_distant", quake_distant(rng))
+    for i in range(1, 4):
+        write_ogg(f"quake_crack{i}", quake_crack(rng))
+
+
 def main():
     rng = np.random.default_rng(1234)
     write_ogg("tornado_roar", tornado_roar(rng))
@@ -115,6 +163,7 @@ def main():
     for i in range(1, 4):
         write_ogg(f"rumble{i}", rumble(rng))
         write_ogg(f"wind_gust{i}", gust(rng))
+    earthquake_sounds()
 
 
 if __name__ == "__main__":

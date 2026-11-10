@@ -21,6 +21,9 @@ public final class ModRegistries {
     public static final DeferredHolder<SoundEvent, SoundEvent> TORNADO_DISTANT = sound("disaster.tornado.distant");
     public static final DeferredHolder<SoundEvent, SoundEvent> DISTANT_RUMBLE = sound("disaster.rumble");
     public static final DeferredHolder<SoundEvent, SoundEvent> WIND_GUST = sound("disaster.wind_gust");
+    public static final DeferredHolder<SoundEvent, SoundEvent> QUAKE_RUMBLE = sound("disaster.earthquake.rumble");
+    public static final DeferredHolder<SoundEvent, SoundEvent> QUAKE_DISTANT = sound("disaster.earthquake.distant");
+    public static final DeferredHolder<SoundEvent, SoundEvent> QUAKE_CRACK = sound("disaster.earthquake.crack");
 
     // Particles
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FUNNEL_CLOUD =
@@ -35,10 +38,14 @@ public final class ModRegistries {
             PARTICLES.register("rain_shaft", () -> new SimpleParticleType(true));
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> DUST_CLOUD =
             PARTICLES.register("dust_cloud", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> QUAKE_DUST =
+            PARTICLES.register("quake_dust", () -> new SimpleParticleType(true));
 
     // Data-driven damage type (data/realisticdisasters/damage_type/tornado.json)
     public static final ResourceKey<DamageType> TORNADO_DAMAGE =
             ResourceKey.create(Registries.DAMAGE_TYPE, id("tornado"));
+    public static final ResourceKey<DamageType> EARTHQUAKE_DAMAGE =
+            ResourceKey.create(Registries.DAMAGE_TYPE, id("earthquake"));
 
     private static DeferredHolder<SoundEvent, SoundEvent> sound(String name) {
         return SOUNDS.register(name, () -> SoundEvent.createVariableRangeEvent(id(name)));

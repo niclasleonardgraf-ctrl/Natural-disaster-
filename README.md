@@ -10,7 +10,8 @@ Full design spec: [`docs/SPEC.md`](docs/SPEC.md).
 | Disaster | State |
 |---|---|
 | Tornado | ✅ complete |
-| Earthquake, Wildfire, Volcano, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
+| Earthquake | ✅ complete |
+| Wildfire, Volcano, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
 
 ## Commands (op level 2)
 
@@ -30,6 +31,20 @@ Full design spec: [`docs/SPEC.md`](docs/SPEC.md).
 4. Stand near the funnel to feel the pull, lift, camera shake and FOV pulse. Afterwards you'll find a track of scoured dirt and scattered debris.
 5. `/disaster stop` lets it dissipate.
 
+## Testing an earthquake in-game
+
+1. `./gradlew runClient`, create a world with cheats on. Build or stand near a few structures (a house with a roof,
+   glass windows, stone-brick walls) to see crumbling; mountains or badlands give rockfalls from overhangs.
+2. `/disaster start earthquake 4 ~ ~ ~` puts the epicentre under you (or omit the position to have it 48 blocks ahead).
+3. Phases: **warning** (~21 s: foreshocks, i.e. short jolts and low rumbles, animals flee, villagers hide),
+   **buildup** (~10 s: the shaking escalates, fissures start to open), **peak** (33–65 s, longer at higher intensity:
+   violent shaking, fissures tear across the ground step by step, roofs and overhangs cave in, wall tops shed blocks,
+   stone bricks crack, glass shatters, dust everywhere), **aftermath** (~25 s: decaying aftershocks, the dust settles).
+4. The shake is strongest at the epicentre and fades with distance (still felt several radii out). Indoors, dust
+   trickles from the ceiling. Afterwards you'll find open fissures, rubble piles and cracked masonry.
+5. Intensity scales radius (30–70 blocks), fissure count (1–4), width (1–3) and depth (4–12), what can fall
+   (up to hardness 1.6 at intensity 1 / 4.0 at intensity 5), how much an unsupported block needs to stay up, and damage.
+
 Shortcut for development: `./gradlew runClientVisualTest` loads the save `run/saves/VisualTest`, moves you onto a
 small pillar, plants a test forest and auto-starts an intensity-4 tornado at peak about 100 blocks away
 (`-Drealisticdisasters.autostart=type,intensity,PHASE`, dev only).
@@ -48,6 +63,10 @@ out and lifts back into the cloud. All textures are soft, 64x64 noise-based PNGs
 - `tornado_damages_terrain`: a pig gets lifted and the turf is scoured
 - `tornado_respects_block_toggle`: with `blockDestruction=false` no blocks change
 - `tornado_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.23 ms)
+- `earthquake_fissures_and_crumbling`: fissures open the ground, the house and overhang crumble into falling-block debris, stone bricks crack
+- `earthquake_respects_block_toggle`: with `blockDestruction=false` no blocks change and no debris spawns
+- `earthquake_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.23 ms)
+- `earthquake_mobs_flee`: a pig near the epicentre runs away during the warning
 
 ## Configuration
 
@@ -55,6 +74,9 @@ out and lifts back into the cloud. All textures are soft, 64x64 noise-based PNGs
   max active disasters, sync range, block destruction on/off, block changes per tick, spawn-protection radius,
   claim-mod respect, extra protected areas (`"dimension,x,z,radius"`), and per-disaster enable / weight / biomes.
   The tornado section also has max debris, duration scale, and whether it changes the weather.
+  The earthquake section has max debris, duration scale, fissures on/off and fissure length scale. Its default biomes
+  are `#minecraft:is_mountain`, `#minecraft:is_badlands`, `#minecraft:is_hill` plus stony shore, windswept gravelly
+  hills / savanna, savanna plateau and desert.
 - `config/realisticdisasters-client.toml`: camera shake on/off and strength, FOV pulse, particle density, fog, sky tint.
   Also editable in-game: Mods → Realistic Natural Disasters → Config.
 
@@ -67,12 +89,15 @@ common (server-safe)
   disaster/DisasterProtection  config + spawn radius + protected areas + claim mods
   disaster/DisasterType      registry of kinds (factory, enable flag, weight, biomes)
   disaster/tornado/TornadoDisaster
+  disaster/earthquake/EarthquakeDisaster   tremor curve, fissures, support-based crumbling
   network/                   DisasterSyncPayload (every 4 ticks), DisasterRemovePayload
   command/DisasterCommand, config/, registry/ModRegistries (sounds, particles, damage type key)
 client (Dist.CLIENT only)
   ClientDisasters / ClientDisaster   interpolated mirror of server state, fade-out after removal
   EffectsManager             blends all disasters into sky/fog/cloud tint, fog distance, shake, FOV
-  DisasterVisual(s)          per-type particles + sounds (tornado/TornadoVisual)
+  DisasterVisual(s)          per-type particles + sounds (tornado/TornadoVisual, earthquake/EarthquakeVisual)
+  earthquake/EarthquakeCamera  extra fast "rattle" camera layer for earthquakes (same config switches as the shake)
+  particle/QuakeDustParticle  free-floating rock-dust puffs
   particle/VortexParticle    funnel / debris / dust particles that orbit their disaster
   sound/DisasterLoopSound    cross-fading positional (near) and non-attenuated (far) loops
 mixin/ClientLevelMixin       adds environment-attribute layers for sky, fog, cloud colour and sky light
@@ -95,6 +120,20 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
 - **Weather:** in the overworld a tornado starts rain (thunder at intensity ≥3) unless it's already thundering.
   Weather is global, so this affects the whole overworld.
 
+- **Earthquake fissures** grow from near the epicentre in steps; each step queues one change per column across the
+  crack (a column change carves up to 12 blocks), so the batching is per column, not per block. Fissures follow the
+  natural ground under buildings, don't drain water (they stop at liquids) and don't cut through terrain more than
+  24 blocks above or below the epicentre.
+- **Earthquake crumbling** is a simple support model rather than real structural physics: a block with nothing solid
+  below falls unless it has at least *intensity* solid horizontal neighbours (so at intensity 5 nothing hangs in the
+  air), and every fall re-checks its neighbours, so collapses cascade over the following ticks. From intensity 3, wall
+  tops can also be shaken off sideways. Leaves, block entities, liquids and non-collidable blocks are never moved;
+  falling debris lands as rubble (it's capped per quake; blocks over the cap wait their turn).
+- **Earthquake damage:** besides falling debris (vanilla falling-block damage), entities near the epicentre take small
+  "shaken" damage at intensity ≥3 during strong shaking, and every grounded entity in the zone gets jostled.
+- **Earthquake camera:** the shared disaster shake (smooth sway) is combined with an earthquake-only high-frequency
+  rattle (`client/earthquake/EarthquakeCamera`), so the foundation classes stay unchanged.
+
 ## Known issues
 
 - Sound has not been heard-tested: the build container has no audio device. The sound files and their playback code
@@ -102,3 +141,6 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
 - The vortex is built from soft translucent particles. From inside the funnel, individual puffs can still be seen.
 - Vanilla rain (blue streaks) is unchanged; replacing it would mean overriding the vanilla rain texture for the whole game.
 - The weather change is global (vanilla limitation).
+- Earthquake sounds were also not heard-tested (same reason). The visual check was done with the headless client in the
+  flat GameTest world; fissure shapes were verified by the GameTests rather than by screenshots.
+- Earthquake dust is built from soft translucent puffs; very close up, individual puffs can still be made out.

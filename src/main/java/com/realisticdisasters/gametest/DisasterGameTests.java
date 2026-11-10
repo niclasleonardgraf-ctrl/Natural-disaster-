@@ -37,6 +37,10 @@ public final class DisasterGameTests {
         FUNCTIONS.register("tornado_damages_terrain", () -> DisasterGameTests::tornadoDamagesTerrain);
         FUNCTIONS.register("tornado_respects_block_toggle", () -> DisasterGameTests::tornadoRespectsBlockToggle);
         FUNCTIONS.register("tornado_intensity3_tick_cost", () -> DisasterGameTests::tornadoTickCost);
+        FUNCTIONS.register("earthquake_fissures_and_crumbling", () -> DisasterGameTests::earthquakeFissuresAndCrumbling);
+        FUNCTIONS.register("earthquake_respects_block_toggle", () -> DisasterGameTests::earthquakeRespectsBlockToggle);
+        FUNCTIONS.register("earthquake_intensity3_tick_cost", () -> DisasterGameTests::earthquakeTickCost);
+        FUNCTIONS.register("earthquake_mobs_flee", () -> DisasterGameTests::earthquakeMobsFlee);
     }
 
     public static void register(IEventBus modBus) {
@@ -49,11 +53,21 @@ public final class DisasterGameTests {
         add(event, "tornado_damages_terrain", event.registerEnvironment(ModRegistries.id("env_terrain")), 500);
         add(event, "tornado_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_toggle")), 300);
         add(event, "tornado_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_perf")), 400);
+        add(event, "earthquake_fissures_and_crumbling", event.registerEnvironment(ModRegistries.id("env_quake_damage")), 700, "earthquake_arena");
+        add(event, "earthquake_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_quake_toggle")), 300, "earthquake_arena");
+        add(event, "earthquake_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_quake_perf")), 400, "earthquake_arena");
+        add(event, "earthquake_mobs_flee", event.registerEnvironment(ModRegistries.id("env_quake_flee")), 300, "earthquake_arena");
     }
 
     private static void add(RegisterGameTestsEvent event, String name, Holder<TestEnvironmentDefinition<?>> env, int maxTicks) {
         var fn = ResourceKey.create(Registries.TEST_FUNCTION, ModRegistries.id(name));
         var data = new TestData<>(env, ModRegistries.id("tornado_arena"), maxTicks, 0, true, Rotation.NONE, false, 1, 1, true, 0);
+        event.registerTest(ModRegistries.id(name), new FunctionGameTestInstance(fn, data));
+    }
+
+    private static void add(RegisterGameTestsEvent event, String name, Holder<TestEnvironmentDefinition<?>> env, int maxTicks, String structure) {
+        var fn = ResourceKey.create(Registries.TEST_FUNCTION, ModRegistries.id(name));
+        var data = new TestData<>(env, ModRegistries.id(structure), maxTicks, 0, true, Rotation.NONE, false, 1, 1, true, 0);
         event.registerTest(ModRegistries.id(name), new FunctionGameTestInstance(fn, data));
     }
 
@@ -140,6 +154,102 @@ public final class DisasterGameTests {
             RealisticDisasters.LOGGER.info("Tornado intensity 3 average server cost: {} ms/tick", String.format("%.3f", cost));
             helper.assertTrue(cost < 2.0, "tornado too expensive: " + cost + " ms/tick");
             helper.succeed();
+        });
+    }
+
+    // ------------------------------------------------------------------ earthquake
+
+    /** Epicentre in the middle of the earthquake arena, on the grass (y 9 is the top soil). */
+    private static Disaster startEarthquake(GameTestHelper helper, int intensity, Phase phase) {
+        DisasterConfig.SPAWN_PROTECTION_RADIUS.set(0);
+        BlockPos center = helper.absolutePos(new BlockPos(20, 10, 20));
+        Disaster d = DisasterManager.start(helper.getLevel(), DisasterType.EARTHQUAKE, Vec3.atBottomCenterOf(center), intensity);
+        if (phase != Phase.WARNING) d.skipTo(phase);
+        return d;
+    }
+
+    private static java.util.Map<BlockPos, net.minecraft.world.level.block.state.BlockState> snapshot(GameTestHelper helper, int y0, int y1) {
+        java.util.Map<BlockPos, net.minecraft.world.level.block.state.BlockState> map = new java.util.HashMap<>();
+        for (int x = 0; x < 40; x++)
+            for (int y = y0; y < y1; y++)
+                for (int z = 0; z < 40; z++) {
+                    BlockPos p = helper.absolutePos(new BlockPos(x, y, z));
+                    map.put(p, helper.getLevel().getBlockState(p));
+                }
+        return map;
+    }
+
+    private static void earthquakeFissuresAndCrumbling(GameTestHelper helper) {
+        var ground = snapshot(helper, 4, 10);
+        var structures = snapshot(helper, 10, 16);
+        Disaster quake = startEarthquake(helper, 4, Phase.PEAK);
+        java.util.Set<Integer> debrisSeen = new java.util.HashSet<>();
+        helper.onEachTick(() -> helper.getLevel().getEntitiesOfClass(net.minecraft.world.entity.item.FallingBlockEntity.class,
+                helper.getBounds().inflate(4)).forEach(fb -> debrisSeen.add(fb.getId())));
+
+        helper.succeedWhen(() -> {
+            helper.assertTrue(DisasterManager.active(helper.getLevel()).contains(quake), "earthquake should be active");
+            long opened = ground.entrySet().stream()
+                    .filter(e -> !e.getValue().isAir() && helper.getLevel().getBlockState(e.getKey()).isAir()).count();
+            helper.assertTrue(opened >= 20, "fissures have not opened enough ground yet (" + opened + " blocks)");
+            long damaged = structures.entrySet().stream()
+                    .filter(e -> !e.getValue().isAir() && helper.getLevel().getBlockState(e.getKey()) != e.getValue()).count();
+            helper.assertTrue(damaged >= 6, "structures have not crumbled enough yet (" + damaged + " blocks)");
+            helper.assertTrue(debrisSeen.size() >= 3, "no falling-block debris yet (" + debrisSeen.size() + ")");
+            helper.assertTrue(helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(12, 10, 12))).is(Blocks.CRACKED_STONE_BRICKS)
+                    || structures.entrySet().stream().anyMatch(e -> helper.getLevel().getBlockState(e.getKey()).is(Blocks.CRACKED_STONE_BRICKS)),
+                    "stone bricks should crack");
+            DisasterManager.stop(helper.getLevel(), quake.id(), false);
+        });
+    }
+
+    private static void earthquakeRespectsBlockToggle(GameTestHelper helper) {
+        DisasterConfig.BLOCK_DESTRUCTION.set(false);
+        var before = snapshot(helper, 0, 20);
+        Disaster quake = startEarthquake(helper, 5, Phase.PEAK);
+        int[] debris = {0};
+        helper.onEachTick(() -> debris[0] += helper.getLevel().getEntitiesOfClass(
+                net.minecraft.world.entity.item.FallingBlockEntity.class, helper.getBounds().inflate(8)).size());
+        helper.runAfterDelay(220, () -> {
+            int count = 0;
+            StringBuilder changed = new StringBuilder();
+            for (var e : before.entrySet()) {
+                var now = helper.getLevel().getBlockState(e.getKey());
+                if (now != e.getValue() && count++ < 5) {
+                    changed.append(helper.relativePos(e.getKey()).toShortString()).append(' ')
+                            .append(e.getValue().getBlock().getDescriptionId()).append("->").append(now.getBlock().getDescriptionId()).append("; ");
+                }
+            }
+            DisasterConfig.BLOCK_DESTRUCTION.set(true);
+            DisasterManager.stop(helper.getLevel(), quake.id(), false);
+            helper.assertTrue(count == 0, "blocks changed although destruction is disabled: " + count + " " + changed);
+            helper.assertTrue(debris[0] == 0, "falling-block debris spawned although destruction is disabled");
+            helper.succeed();
+        });
+    }
+
+    private static void earthquakeTickCost(GameTestHelper helper) {
+        Disaster quake = startEarthquake(helper, 3, Phase.PEAK);
+        for (int i = 0; i < 6; i++) helper.spawn(EntityType.COW, new BlockPos(6 + i * 5, 10, 8));
+        helper.runAfterDelay(300, () -> {
+            double cost = DisasterManager.averageTickCostMs(helper.getLevel());
+            DisasterManager.stop(helper.getLevel(), quake.id(), false);
+            RealisticDisasters.LOGGER.info("Earthquake intensity 3 average server cost: {} ms/tick", String.format("%.3f", cost));
+            helper.assertTrue(cost < 2.0, "earthquake too expensive: " + cost + " ms/tick");
+            helper.succeed();
+        });
+    }
+
+    /** During the warning, animals near the epicentre run away from it. */
+    private static void earthquakeMobsFlee(GameTestHelper helper) {
+        Pig pig = helper.spawn(EntityType.PIG, new BlockPos(17, 10, 20));
+        Disaster quake = startEarthquake(helper, 3, Phase.WARNING);
+        Vec3 epicentre = quake.pos();
+        double startDist = Math.hypot(pig.getX() - epicentre.x, pig.getZ() - epicentre.z);
+        helper.succeedWhen(() -> {
+            double dist = Math.hypot(pig.getX() - epicentre.x, pig.getZ() - epicentre.z);
+            helper.assertTrue(dist > startDist + 6, "pig did not flee (distance " + String.format("%.1f", dist) + ")");
+            DisasterManager.stop(helper.getLevel(), quake.id(), false);
         });
     }
 

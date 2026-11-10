@@ -177,6 +177,7 @@ def main():
         write(soft_cloud(200 + i, density=0.85, wispy=True), f"dust_cloud_{i}")
         write(rain_shaft(400 + i), f"rain_shaft_{i}")
         write(debris_texture(300 + i), f"storm_debris_{i}")
+        write(soft_cloud(600 + i, density=0.8, wispy=True), f"quake_dust_{i}")  # earthquake rock dust
 
     # 16x16 mod icon (tornado silhouette on a storm sky), upscaled with nearest neighbour for the mod list.
     icon = Image.new("RGBA", (16, 16), (78, 91, 71, 255))
