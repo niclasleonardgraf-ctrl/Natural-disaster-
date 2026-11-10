@@ -149,7 +149,8 @@ public final class VolcanoVisual implements DisasterVisual {
                 .expandTowards(wind.scale(height * 0.4));
         boolean visible = camera.getCullFrustum() == null || camera.getCullFrustum().isVisible(box);
         if (!visible) lod *= 0.1f;
-        float budget = (6 + d.intensity * 4) * density * lod;
+        // Sized for vanilla's shared particle queue (16384): ~4-5k live ash puffs at intensity 3-4.
+        float budget = (5 + d.intensity * 3) * density * lod;
 
         // Warning: thin steam and smoke wisps from the vent.
         if (d.phase == Phase.WARNING || col < 0.05f) {
@@ -162,7 +163,7 @@ public final class VolcanoVisual implements DisasterVisual {
         }
 
         // Eruption column: puffs along the leaning stem.
-        int stem = count(budget * 1.8f * col);
+        int stem = count(budget * 1.4f * col);
         for (int i = 0; i < stem; i++) {
             float hf = (float) Math.pow(RANDOM.nextFloat(), 0.8);
             double lean = Math.pow(hf, 1.6) * height * 0.35;
@@ -173,7 +174,7 @@ public final class VolcanoVisual implements DisasterVisual {
                     wind.x * 0.04 * hf, 0.08 + RANDOM.nextDouble() * 0.12 * (1 - hf), wind.z * 0.04 * hf);
         }
         // Umbrella cloud spreading out at the top of the column.
-        int cap = count(budget * 1.2f * col);
+        int cap = count(budget * 0.9f * col);
         for (int i = 0; i < cap; i++) {
             double a = RANDOM.nextDouble() * Math.PI * 2;
             double r = Math.sqrt(RANDOM.nextDouble()) * height * 0.45;
