@@ -1,0 +1,43 @@
+{
+  "disaster.realisticdisasters.tornado": "Tornado",
+  "disaster.realisticdisasters.tornado.warning": "The sky turns a sickly green... a storm is organising nearby.",
+  "disaster.realisticdisasters.tornado.touchdown": "A funnel is reaching for the ground! Take shelter!",
+
+  "phase.realisticdisasters.warning": "Warning",
+  "phase.realisticdisasters.buildup": "Buildup",
+  "phase.realisticdisasters.peak": "Peak",
+  "phase.realisticdisasters.aftermath": "Aftermath",
+
+  "commands.realisticdisasters.unknown_type": "Unknown disaster type: %s",
+  "commands.realisticdisasters.started": "Started %s #%s (intensity %s) at %s",
+  "commands.realisticdisasters.stopped": "Disaster #%s is dissipating",
+  "commands.realisticdisasters.stopped_all": "Stopping %s disaster(s)",
+  "commands.realisticdisasters.not_found": "No active disaster with id %s in this dimension",
+  "commands.realisticdisasters.cost": "Disaster server cost: %s ms/tick (budget: 50 ms)",
+  "commands.realisticdisasters.none": "No active disasters in this dimension",
+  "commands.realisticdisasters.entry": "#%s %s - intensity %s, %s, at %s",
+
+  "death.attack.realisticdisasters.tornado": "%1$s was swept away by a tornado",
+  "death.attack.realisticdisasters.tornado.player": "%1$s was swept away by a tornado while fighting %2$s",
+
+  "subtitles.realisticdisasters.tornado.roar": "Tornado roars",
+  "subtitles.realisticdisasters.tornado.distant": "Distant rumbling wind",
+  "subtitles.realisticdisasters.rumble": "Distant rumble",
+  "subtitles.realisticdisasters.wind_gust": "Wind gusts",
+  "subtitles.realisticdisasters.tornado.core": "Deafening roar",
+  "subtitles.realisticdisasters.wind_howl": "Wind howls",
+  "subtitles.realisticdisasters.debris_thud": "Debris crashes",
+  "subtitles.realisticdisasters.wood_snap": "Tree snaps",
+  "subtitles.realisticdisasters.debris_rattle": "Debris rattles",
+
+  "realisticdisasters.configuration.title": "Realistic Natural Disasters",
+  "realisticdisasters.configuration.section.realisticdisasters.common.toml": "Disasters (server)",
+  "realisticdisasters.configuration.section.realisticdisasters.common.toml.title": "Disasters (server)",
+  "realisticdisasters.configuration.section.realisticdisasters.client.toml": "Visuals (client)",
+  "realisticdisasters.configuration.section.realisticdisasters.client.toml.title": "Visuals (client)",
+  "realisticdisasters.configuration.general": "General",
+  "realisticdisasters.configuration.destruction": "Destruction & protection",
+  "realisticdisasters.configuration.tornado": "Tornado",
+  "realisticdisasters.configuration.camera": "Camera",
+  "realisticdisasters.configuration.visuals": "Visuals"
+}
