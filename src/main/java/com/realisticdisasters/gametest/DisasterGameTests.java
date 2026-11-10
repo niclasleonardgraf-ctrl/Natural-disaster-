@@ -73,8 +73,6 @@ public final class DisasterGameTests {
         var fn = ResourceKey.create(Registries.TEST_FUNCTION, ModRegistries.id(name));
         var data = new TestData<>(env, ModRegistries.id("tsunami_arena"), maxTicks, 0, true, Rotation.NONE, false, 1, 1, true, 0);
         event.registerTest(ModRegistries.id(name), new FunctionGameTestInstance(fn, data));
-        FUNCTIONS.register("wildfire_heats_the_world", () -> DisasterGameTests::wildfireHeatsTheWorld);
-        FUNCTIONS.register("wildfire_whirl_lofts_objects", () -> DisasterGameTests::wildfireWhirlLoftsObjects);
     }
 
     public static void register(IEventBus modBus) {
@@ -93,6 +91,8 @@ public final class DisasterGameTests {
         FUNCTIONS.register("volcano_pyroclastic_flow", () -> DisasterGameTests::volcanoPyroclasticFlow);
         FUNCTIONS.register("volcano_mountain_scales", () -> DisasterGameTests::volcanoMountainScales);
         modBus.addListener(DisasterGameTests::registerTests);
+        FUNCTIONS.register("wildfire_heats_the_world", () -> DisasterGameTests::wildfireHeatsTheWorld);
+        FUNCTIONS.register("wildfire_whirl_lofts_objects", () -> DisasterGameTests::wildfireWhirlLoftsObjects);
     }
 
     private static void registerTests(RegisterGameTestsEvent event) {
