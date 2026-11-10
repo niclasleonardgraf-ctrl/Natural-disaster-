@@ -56,7 +56,7 @@ final class WindStormGameTests {
     /** The storm lays down layers and an armour stand standing in the open gets shoved downwind. */
     static void buriesAndPushes(GameTestHelper helper, DisasterType type) {
         WindStormDisaster storm = startPeak(helper, type, 5);
-        ArmorStand stand = helper.spawn(EntityType.ARMOR_STAND, new BlockPos(4, 4, 16));
+        ArmorStand stand = helper.spawn(EntityType.ARMOR_STAND, new BlockPos(10, 4, 16));
         double startX = stand.getX();
         double[] maxPush = {0};
         helper.onEachTick(() -> maxPush[0] = Math.max(maxPush[0], stand.getX() - startX));
@@ -69,19 +69,36 @@ final class WindStormGameTests {
         });
     }
 
+    /**
+     * With {@code blockDestruction=false} nothing changes. Test batches run concurrently in one world, so the global
+     * switch is only flipped inside a single server tick: 200 storm ticks are simulated synchronously, then every
+     * block-touching hook is called directly, and the switch goes back on before any other test can tick.
+     */
     static void respectsBlockToggle(GameTestHelper helper, DisasterType type) {
-        DisasterConfig.BLOCK_DESTRUCTION.set(false);
-        Map<BlockPos, BlockState> before = new HashMap<>();
-        for (int x = 0; x < 32; x++)
-            for (int y = 3; y < 9; y++)
-                for (int z = 0; z < 32; z++) {
-                    BlockPos p = helper.absolutePos(new BlockPos(x, y, z));
-                    before.put(p, helper.getLevel().getBlockState(p));
-                }
+        BlockPos fire = helper.absolutePos(new BlockPos(12, 4, 12));
+        helper.getLevel().setBlock(fire, net.minecraft.world.level.block.Blocks.CAMPFIRE.defaultBlockState(), 3);
         WindStormDisaster storm = startPeak(helper, type, 5);
-        helper.runAfterDelay(200, () -> {
-            for (int i = 0; i < 20; i++) storm.accumulateColumn(helper.absolutePos(new BlockPos(19, 4, 21)).getX(),
-                    helper.absolutePos(new BlockPos(19, 4, 21)).getZ());
+        helper.runAfterDelay(1, () -> {
+            Map<BlockPos, BlockState> before = new HashMap<>();
+            for (int x = 0; x < 32; x++)
+                for (int y = 3; y < 9; y++)
+                    for (int z = 0; z < 32; z++) {
+                        BlockPos p = helper.absolutePos(new BlockPos(x, y, z));
+                        before.put(p, helper.getLevel().getBlockState(p));
+                    }
+            int queued = DisasterManager.blockQueue(helper.getLevel()).size();
+            DisasterConfig.BLOCK_DESTRUCTION.set(false);
+            try {
+                for (int i = 0; i < 200; i++) storm.tick();
+                BlockPos drift = helper.absolutePos(new BlockPos(19, 4, 21));
+                for (int i = 0; i < 20; i++) {
+                    storm.weatherColumn(fire.getX(), fire.getZ());
+                    storm.accumulateColumn(drift.getX(), drift.getZ());
+                }
+            } finally {
+                DisasterConfig.BLOCK_DESTRUCTION.set(true);
+            }
+            int queuedAfter = DisasterManager.blockQueue(helper.getLevel()).size();
             int count = 0;
             StringBuilder changed = new StringBuilder();
             for (var e : before.entrySet()) {
@@ -91,9 +108,9 @@ final class WindStormGameTests {
                             .append(e.getValue().getBlock().getDescriptionId()).append("->").append(now.getBlock().getDescriptionId()).append("; ");
                 }
             }
-            DisasterConfig.BLOCK_DESTRUCTION.set(true);
             finish(helper, storm);
             helper.assertTrue(count == 0, "blocks changed although destruction is disabled: " + count + " " + changed);
+            helper.assertTrue(queuedAfter <= queued, "storm queued block changes although destruction is disabled");
             helper.succeed();
         });
     }
@@ -124,6 +141,58 @@ final class WindStormGameTests {
         finish(helper, storm);
         helper.assertTrue(pile.is(Blocks.SAND), "expected a sand pile against the wall, got " + pile);
         helper.assertTrue(flat.is(ModRegistries.SAND_LAYER.get()), "expected a thin sand layer on open ground, got " + flat);
+        helper.succeed();
+    }
+
+    /** Wind physics: a wall's lee shelters you, the open doesn't; loose items tumble away downwind. */
+    static void leeShelters(GameTestHelper helper) {
+        WindStormDisaster storm = startPeak(helper, DisasterType.BLIZZARD, 5);
+        ArmorStand open = helper.spawn(EntityType.ARMOR_STAND, new BlockPos(25, 4, 8));
+        ArmorStand lee = helper.spawn(EntityType.ARMOR_STAND, new BlockPos(25, 4, 21)); // 2 blocks behind the shed wall
+        var item = helper.spawnItem(net.minecraft.world.item.Items.STICK, new BlockPos(25, 4, 4));
+        double openX = open.getX(), leeX = lee.getX(), itemX = item.getX();
+        double[] max = {0, 0, 0};
+        helper.onEachTick(() -> {
+            max[0] = Math.max(max[0], open.getX() - openX);
+            max[1] = Math.max(max[1], lee.getX() - leeX);
+            if (!item.isRemoved()) max[2] = Math.max(max[2], item.getX() - itemX);
+        });
+        helper.runAfterDelay(300, () -> {
+            finish(helper, storm);
+            String msg = String.format("open %.2f, lee %.2f, item %.2f", max[0], max[1], max[2]);
+            RealisticDisasters.LOGGER.info("Wind push over 15 s at intensity 5: {}", msg);
+            helper.assertTrue(max[0] > 1.0, "open-ground stand barely moved: " + msg);
+            helper.assertTrue(max[1] < max[0] * 0.5, "the wall's lee did not shelter: " + msg);
+            helper.assertTrue(max[2] > 2.0, "loose item was not blown away: " + msg);
+            helper.succeed();
+        });
+    }
+
+    /** Open flames are blown out and exposed crops die (frost) / are buried (sand). */
+    static void weathersFiresAndCrops(GameTestHelper helper) {
+        var level = helper.getLevel();
+        BlockPos camp = helper.absolutePos(new BlockPos(12, 4, 12));
+        BlockPos candle = helper.absolutePos(new BlockPos(13, 4, 12));
+        BlockPos crop = helper.absolutePos(new BlockPos(14, 4, 12));
+        level.setBlock(camp, net.minecraft.world.level.block.Blocks.CAMPFIRE.defaultBlockState(), 3);
+        level.setBlock(candle, net.minecraft.world.level.block.Blocks.CANDLE.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.LIT, true), 3);
+        level.setBlock(crop.below(), net.minecraft.world.level.block.Blocks.FARMLAND.defaultBlockState(), 3);
+        level.setBlock(crop, net.minecraft.world.level.block.Blocks.WHEAT.defaultBlockState(), 3);
+        WindStormDisaster storm = startPeak(helper, DisasterType.SANDSTORM, 4);
+        for (int i = 0; i < 12; i++) {
+            storm.weatherColumn(camp.getX(), camp.getZ());
+            storm.weatherColumn(candle.getX(), candle.getZ());
+            storm.weatherColumn(crop.getX(), crop.getZ());
+        }
+        var lit = net.minecraft.world.level.block.state.properties.BlockStateProperties.LIT;
+        boolean campLit = level.getBlockState(camp).getValue(lit);
+        boolean candleLit = level.getBlockState(candle).getValue(lit);
+        boolean wheat = level.getBlockState(crop).is(net.minecraft.world.level.block.Blocks.WHEAT);
+        finish(helper, storm);
+        helper.assertTrue(!campLit, "campfire still burning");
+        helper.assertTrue(!candleLit, "candle still burning");
+        helper.assertTrue(!wheat, "exposed wheat survived the storm");
         helper.succeed();
     }
 

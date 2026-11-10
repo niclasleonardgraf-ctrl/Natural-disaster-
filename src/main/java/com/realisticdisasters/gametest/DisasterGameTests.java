@@ -46,6 +46,8 @@ public final class DisasterGameTests {
         FUNCTIONS.register("sandstorm_respects_block_toggle", () -> h -> WindStormGameTests.respectsBlockToggle(h, DisasterType.SANDSTORM));
         FUNCTIONS.register("sandstorm_intensity3_tick_cost", () -> h -> WindStormGameTests.tickCost(h, DisasterType.SANDSTORM));
         FUNCTIONS.register("sandstorm_builds_piles", () -> WindStormGameTests::sandstormBuildsPiles);
+        FUNCTIONS.register("windstorm_lee_shelters", () -> WindStormGameTests::leeShelters);
+        FUNCTIONS.register("windstorm_weathers_fires_and_crops", () -> WindStormGameTests::weathersFiresAndCrops);
     }
 
     public static void register(IEventBus modBus) {
@@ -67,6 +69,8 @@ public final class DisasterGameTests {
         add(event, "sandstorm_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_sandstorm_toggle")), 300);
         add(event, "sandstorm_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_sandstorm_perf")), 400);
         add(event, "sandstorm_builds_piles", event.registerEnvironment(ModRegistries.id("env_sandstorm_piles")), 100);
+        add(event, "windstorm_lee_shelters", event.registerEnvironment(ModRegistries.id("env_windstorm_lee")), 400);
+        add(event, "windstorm_weathers_fires_and_crops", event.registerEnvironment(ModRegistries.id("env_windstorm_weather")), 100);
     }
 
     private static void add(RegisterGameTestsEvent event, String name, Holder<TestEnvironmentDefinition<?>> env, int maxTicks) {

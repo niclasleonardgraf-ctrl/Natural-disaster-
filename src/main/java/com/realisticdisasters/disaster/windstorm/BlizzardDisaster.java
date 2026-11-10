@@ -55,7 +55,11 @@ public class BlizzardDisaster extends WindStormDisaster {
             }
             return;
         }
-        addLayer(top, Blocks.SNOW.defaultBlockState(), Math.min(8, 1 + intensity + drift));
+        int n = addLayer(top, Blocks.SNOW.defaultBlockState(), Math.min(8, 1 + intensity + drift));
+        if (n == 8 && drift >= 3 && intensity >= 3) {
+            // Deep, wind-packed-on-top but loose-underneath drifts: you sink right in (and can't climb out easily).
+            level.setBlock(top, Blocks.POWDER_SNOW.defaultBlockState(), 3);
+        }
     }
 
     @Override

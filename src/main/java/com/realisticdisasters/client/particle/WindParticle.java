@@ -2,6 +2,7 @@ package com.realisticdisasters.client.particle;
 
 import com.realisticdisasters.client.ClientDisaster;
 import com.realisticdisasters.client.ClientDisasters;
+import com.realisticdisasters.disaster.windstorm.StormWind;
 import com.realisticdisasters.disaster.windstorm.WindStormDisaster;
 import net.minecraft.client.Camera;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -33,7 +34,7 @@ import org.joml.Vector3f;
  * plus a fractional part = height fraction for wall puffs.
  */
 public class WindParticle extends SingleQuadParticle {
-    public static final int RED = 1, DRIFT = 2, WALL = 4;
+    public static final int RED = 1, DRIFT = 2, WALL = 4, SKIRT = 8;
 
     public enum Kind {
         FLAKE(false), GRAIN(false), SNOW_HAZE(true), SAND_HAZE(true);
@@ -48,9 +49,9 @@ public class WindParticle extends SingleQuadParticle {
     private final Kind kind;
     private final SpriteSet sprites;
     private final int disasterId;
-    private final boolean drift, wall;
+    private final boolean drift, wall, skirt;
     private final float baseSize;
-    private final float speedJitter;
+    private float speedJitter;
     private final float lift;
     private final float phase;
     private final float hover;
@@ -69,6 +70,7 @@ public class WindParticle extends SingleQuadParticle {
         boolean red = (flags & RED) != 0;
         this.drift = (flags & DRIFT) != 0 && !kind.haze;
         this.wall = (flags & WALL) != 0 && kind.haze;
+        this.skirt = wall && (flags & SKIRT) != 0;
         RandomSource r = this.random;
         setSprite(kind.haze ? sprites.get(r) : sprites.get(0, 3));
         this.gravity = 0;
@@ -124,6 +126,12 @@ public class WindParticle extends SingleQuadParticle {
                 baseAlpha = wall ? 1f : 0.3f + r.nextFloat() * 0.3f;
             }
         }
+        if (skirt) {
+            // Outflow skirt: runs ahead of the wall much faster than the wall itself, hugging the ground.
+            speedJitter = 0.45f + r.nextFloat() * 0.35f;
+            lifetime = 40 + r.nextInt(40);
+            baseAlpha = 0.45f + r.nextFloat() * 0.25f;
+        }
         this.hasPhysics = !kind.haze && !drift;
         this.quadSize = baseSize;
         this.roll = this.oRoll = kind.haze ? r.nextFloat() * Mth.TWO_PI : 0f;
@@ -149,9 +157,10 @@ public class WindParticle extends SingleQuadParticle {
         }
         ClientDisaster d = ClientDisasters.get(disasterId);
         if (d != null) {
-            float gust = d.data(WindStormDisaster.D_GUST);
-            float speed = d.data(WindStormDisaster.D_WIND_SPEED) * gust * speedJitter;
             double wx = d.data(WindStormDisaster.D_WIND_X), wz = d.data(WindStormDisaster.D_WIND_Z);
+            // Same gust field the server pushes entities with: gust fronts visibly sweep through the snow / dust.
+            float gust = StormWind.gust(d.data(WindStormDisaster.D_GUST), x, z, wx, wz, level.getGameTime(), disasterId);
+            float speed = d.data(WindStormDisaster.D_WIND_SPEED) * gust * speedJitter;
             // Turbulence: a cross-wind wobble and vertical swirl, different per particle.
             float t = age * (kind.haze ? 0.05f : 0.25f) + phase;
             double cross = Mth.sin(t) * speed * (kind.haze ? 0.12 : drift ? 0.15 : 0.3);

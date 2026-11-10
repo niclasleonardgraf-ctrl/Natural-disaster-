@@ -25,6 +25,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -43,7 +47,6 @@ public abstract class WindStormDisaster extends Disaster {
     private static final int SHELTER_RANGE = 14, SHELTER_TRIES = 8, MAX_MOBS_PER_PASS = 40;
 
     protected final float radius;
-    protected final float push;
     private final double driftSpeed;
     private double heading;
     private double headingDrift;
@@ -53,7 +56,6 @@ public abstract class WindStormDisaster extends Disaster {
         super(type, level, id, pos, intensity);
         int i = this.intensity;
         this.radius = 40f + i * 16f;               // 56 .. 120
-        this.push = 0.010f + i * 0.006f;           // blocks/tick² of downwind acceleration at full gust
         this.driftSpeed = 0.015 + i * 0.004;       // the storm itself creeps along with the wind
         this.heading = random.nextDouble() * Math.PI * 2;
         setDuration(Phase.WARNING, 400);
@@ -129,6 +131,7 @@ public abstract class WindStormDisaster extends Disaster {
             // Entity scan every other tick with a doubled push: same feel, half the cost.
             if (age() % 2 == 0) pushEntities(s);
             if (s > 0.3f) queueAccumulation(s);
+            if (s > 0.3f && age() % 5 == 0) queueWeathering(s);
         }
     }
 
@@ -166,29 +169,91 @@ public abstract class WindStormDisaster extends Disaster {
         return 1f - smooth((float) ((r - radius * 0.75) / (radius * 0.25)));
     }
 
+    /** Static friction: a creature standing on the ground only starts to slide once the wind beats its grip. */
+    private static final double GRIP = 0.018;
+
+    /**
+     * Aerodynamic drag, run every other tick (hence the doubled step). Wind speed at each entity comes from
+     * {@link StormWind}: the travelling gust fronts, the height profile (calmer at your feet, stronger on a roof or
+     * ridge) and shelter (none under a roof, a wind shadow in the lee of walls). The push depends on the speed
+     * difference between wind and object and on how much surface it offers per unit of mass, so a chicken is blown
+     * about, a player struggles into the gusts, an iron golem barely notices, items tumble along the ground and pile
+     * up against walls, and arrows drift in a crosswind.
+     */
     private void pushEntities(float s) {
         AABB box = new AABB(pos.x - radius, pos.y - 48, pos.z - radius, pos.x + radius, pos.y + 96, pos.z + radius);
-        Vec3 w = wind();
+        Vec3 dir = wind();
+        long time = level.getGameTime();
+        float speed = windSpeed();
         boolean hurtTick = age() % 10 == 0;
         for (Entity e : level.getEntities((Entity) null, box, e -> !e.isSpectator() && !(e instanceof FallingBlockEntity))) {
             if (e instanceof Player p && p.getAbilities().flying) continue;
-            if (e.isPassenger() || e.isInWater()) continue;
+            if (e.isPassenger()) continue;
             float cover = coverage(e.getX(), e.getZ());
-            if (cover <= 0.01f || !exposed(e)) continue;
-            float force = s * cover;
-            if (hurtTick && e instanceof LivingEntity le) affectExposed(le, force);
+            if (cover <= 0.01f) continue;
+            float expo = StormWind.exposure(level, e.getX(), e.getY(), e.getZ(), dir.x, dir.z);
+            if (expo <= 0.02f) continue;
+            double midY = e.getY() + e.getBbHeight() * 0.5;
+            float g = StormWind.gust(gust, e.getX(), e.getZ(), dir.x, dir.z, time, id);
+            float h = StormWind.heightFactor(StormWind.heightAboveGround(level, e.getX(), midY, e.getZ()));
+            if (hurtTick && e instanceof LivingEntity le) affectExposed(le, s * cover * expo * Math.min(1f, g));
 
-            double resist = 0;
-            if (e instanceof LivingEntity le) resist = Mth.clamp(le.getAttributeValue(Attributes.KNOCKBACK_RESISTANCE), 0, 1) * 0.8;
-            double a = 2 * push * force * gust * (1 - resist) * (e.onGround() ? 1.0 : 0.6);
+            double ws = speed * cover * g * h * expo;
             Vec3 v = e.getDeltaMovement();
-            // Push toward the wind's own speed, not beyond: walking into it is slow, walking with it is quick.
-            double along = v.x * w.x + v.z * w.z;
-            double cap = 0.12 + intensity * 0.05;
-            if (along > cap) continue;
-            e.setDeltaMovement(v.x + w.x * a, v.y, v.z + w.z * a);
+            double rx = dir.x * ws - v.x, rz = dir.z * ws - v.z;
+            double rel = Math.sqrt(rx * rx + rz * rz);
+            double ax, az, ay = 0;
+            if (e instanceof net.minecraft.world.entity.projectile.Projectile) {
+                // Crosswind drift: mostly the component across the flight path, a little head/tail wind.
+                double vl = Math.sqrt(v.x * v.x + v.z * v.z);
+                if (vl < 1.0e-3) continue;
+                double fx = v.x / vl, fz = v.z / vl;
+                double along = rx * fx + rz * fz;
+                ax = (rx - fx * along) * 0.05 + fx * along * 0.006;
+                az = (rz - fz * along) * 0.05 + fz * along * 0.006;
+            } else {
+                double k = dragCoefficient(e);
+                double a = k * Math.min(1.5, 0.35 + rel);
+                ax = rx * a;
+                az = rz * a;
+                boolean item = e instanceof net.minecraft.world.entity.item.ItemEntity;
+                if (e.onGround()) {
+                    double len = Math.sqrt(ax * ax + az * az);
+                    double grip = item ? GRIP * 0.4 : GRIP;
+                    if (len <= grip) continue;
+                    ax *= (len - grip) / len;
+                    az *= (len - grip) / len;
+                    // Strong gusts catch loose items and make them hop along.
+                    if (item && g > 1.15 && random.nextFloat() < 0.25f) ay = 0.06 + random.nextFloat() * 0.08 * g;
+                }
+            }
+            Vec3 nv = new Vec3(v.x + ax * 2, v.y + ay, v.z + az * 2);
+            double max = 1.6;
+            if (nv.horizontalDistanceSqr() > max * max) {
+                double f = max / Math.sqrt(nv.horizontalDistanceSqr());
+                nv = new Vec3(nv.x * f, nv.y, nv.z * f);
+            }
+            e.setDeltaMovement(nv);
             e.hurtMarked = true;
         }
+    }
+
+    /** Drag per tick relative to the wind: big light objects fly, small heavy ones resist (same model as the tornado). */
+    private static double dragCoefficient(Entity e) {
+        double k;
+        if (e instanceof net.minecraft.world.entity.item.ItemEntity || e instanceof net.minecraft.world.entity.ExperienceOrb) {
+            k = 0.12;
+        } else if (e instanceof LivingEntity le) {
+            double area = e.getBbWidth() * e.getBbHeight();
+            k = 0.1 / Math.max(0.6, Math.sqrt(area));
+            k *= 1 - 0.8 * Mth.clamp(le.getAttributeValue(Attributes.KNOCKBACK_RESISTANCE), 0, 1);
+            if (le.isShiftKeyDown()) k *= 0.6;      // crouching lowers your profile
+        } else {
+            k = 0.06;                               // boats, minecarts, armour stands...
+        }
+        if (e.isInWater()) k *= 0.3;
+        if (e.onGround()) k *= 0.55;
+        return k;
     }
 
     // ------------------------------------------------------------------ mobs take shelter
@@ -252,10 +317,7 @@ public abstract class WindStormDisaster extends Disaster {
         if (!DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean()) return;
         int patches = count((1f + intensity * 0.9f) * s * accumulationRate());
         if (patches <= 0) return;
-        List<ServerPlayer> watchers = new ArrayList<>();
-        for (ServerPlayer p : level.players()) {
-            if (!p.isSpectator() && coverage(p.getX(), p.getZ()) > 0.2f) watchers.add(p);
-        }
+        List<ServerPlayer> watchers = watchers();
         var queue = DisasterManager.blockQueue(level);
         for (int i = 0; i < patches; i++) {
             double cx, cz;
@@ -278,6 +340,59 @@ public abstract class WindStormDisaster extends Disaster {
     }
 
     private static final int WATCHED_RADIUS = 40;
+
+    /** Players standing inside the storm (where its effects are actually seen). */
+    private List<ServerPlayer> watchers() {
+        List<ServerPlayer> watchers = new ArrayList<>();
+        for (ServerPlayer p : level.players()) {
+            if (!p.isSpectator() && coverage(p.getX(), p.getZ()) > 0.2f) watchers.add(p);
+        }
+        return watchers;
+    }
+
+    /** Fires, candles and crops near players get their turn to face the storm (batched through the block queue). */
+    private void queueWeathering(float s) {
+        if (!DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean()) return;
+        var queue = DisasterManager.blockQueue(level);
+        for (ServerPlayer p : watchers()) {
+            for (int i = 0; i < 6; i++) {
+                int x = Mth.floor(p.getX()) + random.nextInt(49) - 24, z = Mth.floor(p.getZ()) + random.nextInt(49) - 24;
+                if (random.nextFloat() > s * coverage(x + 0.5, z + 0.5)) continue;
+                if (!queue.add(l -> {
+                    if (!isFinished() && level.isLoaded(new BlockPos(x, 0, z))) weatherColumn(x, z);
+                })) return;
+            }
+        }
+    }
+
+    /**
+     * What a gale full of snow or sand does to the exposed top of one column: open flames (fire, campfires, candles)
+     * are blown out; at intensity 3+ crops are killed (frost) or buried (sand). Public as an admin / test hook.
+     */
+    public void weatherColumn(int x, int z) {
+        int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z);
+        for (int y = top; y >= top - 1; y--) {
+            BlockPos p = new BlockPos(x, y, z);
+            BlockState st = level.getBlockState(p);
+            if (st.is(BlockTags.FIRE)) {
+                if (!DisasterProtection.canModify(level, p, st)) return;
+                level.removeBlock(p, false);
+                level.playSound(null, p, SoundEvents.FIRE_EXTINGUISH, SoundSource.BLOCKS, 0.5f, 1.4f + random.nextFloat() * 0.4f);
+                return;
+            }
+            if ((st.is(BlockTags.CAMPFIRES) || st.is(BlockTags.CANDLES) || st.is(BlockTags.CANDLE_CAKES))
+                    && st.hasProperty(BlockStateProperties.LIT) && st.getValue(BlockStateProperties.LIT)) {
+                if (!DisasterProtection.canModify(level, p, st)) return;
+                level.setBlock(p, st.setValue(BlockStateProperties.LIT, false), 3);
+                level.playSound(null, p, SoundEvents.FIRE_EXTINGUISH, SoundSource.BLOCKS, 0.6f, 1.2f + random.nextFloat() * 0.4f);
+                return;
+            }
+            if (st.is(BlockTags.CROPS) && intensity >= 3) {
+                if (random.nextFloat() < 0.5f && DisasterProtection.canModify(level, p, st)) level.destroyBlock(p, false);
+                return;
+            }
+        }
+    }
 
     private void accumulatePatch(int x, int z) {
         for (int dx = -1; dx <= 1; dx++) {
@@ -347,7 +462,8 @@ public abstract class WindStormDisaster extends Disaster {
             level.setBlock(top, there.setValue(layers, n + 1), 3);
             return n + 1;
         }
-        if (!(there.isAir() || there.canBeReplaced() && there.getFluidState().isEmpty() && !there.hasBlockEntity())) return 0;
+        boolean plant = there.is(BlockTags.SAPLINGS) || there.is(BlockTags.SMALL_FLOWERS);
+        if (!(there.isAir() || (there.canBeReplaced() || plant) && there.getFluidState().isEmpty() && !there.hasBlockEntity())) return 0;
         if (!layerDefault.canSurvive(level, top) || !DisasterProtection.canModify(level, top, there)) return 0;
         level.setBlock(top, layerDefault, 3);
         return 1;

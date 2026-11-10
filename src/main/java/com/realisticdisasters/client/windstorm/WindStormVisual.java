@@ -7,6 +7,7 @@ import com.realisticdisasters.client.DisasterVisual;
 import com.realisticdisasters.client.sound.DisasterLoopSound;
 import com.realisticdisasters.config.ClientConfig;
 import com.realisticdisasters.disaster.Phase;
+import com.realisticdisasters.disaster.windstorm.StormWind;
 import com.realisticdisasters.disaster.windstorm.WindStormDisaster;
 import com.realisticdisasters.registry.ModRegistries;
 import net.minecraft.client.Camera;
@@ -52,6 +53,11 @@ public abstract class WindStormVisual implements DisasterVisual {
         float howlVolume, distantVolume, howlPitch = 1f;
         boolean sheltered;
         int nextGust = 60;
+        /** 0..1 wind exposure at the camera (lee of walls, roofs). */
+        float exposure = 1f;
+        float prevIn = -1f;
+        /** Ticks left of the "front hits you" jolt. */
+        int impact;
     }
 
     protected abstract Palette palette(ClientDisaster d);
@@ -78,8 +84,13 @@ public abstract class WindStormVisual implements DisasterVisual {
         return 1f - smoothstep(r * 0.75f, r + 16f, (float) dist);
     }
 
-    static float gust(ClientDisaster d) {
-        return Mth.clamp(d.data(WindStormDisaster.D_GUST), 0.3f, 1.6f);
+    /** Local gust factor at a point: the storm's surge plus the gust fronts sweeping downwind (see StormWind). */
+    static float gust(ClientDisaster d, Vec3 at) {
+        ClientLevel level = Minecraft.getInstance().level;
+        double wx = d.data(WindStormDisaster.D_WIND_X), wz = d.data(WindStormDisaster.D_WIND_Z);
+        double wl = Math.max(1.0e-3, Math.sqrt(wx * wx + wz * wz));
+        long time = level == null ? 0 : level.getGameTime();
+        return StormWind.gust(Mth.clamp(d.data(WindStormDisaster.D_GUST), 0.3f, 1.6f), at.x, at.z, wx / wl, wz / wl, time, d.id);
     }
 
     static boolean sheltered(ClientLevel level, Vec3 cam) {
@@ -96,18 +107,22 @@ public abstract class WindStormVisual implements DisasterVisual {
         double dist = horizontalDistance(d, cam);
         float s = d.strength();
         float in = inside(d, dist);
-        float g = gust(d);
+        float g = gust(d, cam);
         // Denser air in gusts and at higher intensity: the colour deepens as visibility drops.
         float dense = Mth.clamp((d.intensity - 1) / 4f * 0.8f + (g - 1f) * 0.6f, 0f, 1f);
         int fogColor = ARGB.srgbLerp(dense, 0xFF000000 | p.fog, 0xFF000000 | p.fogDense) & 0xFFFFFF;
         // The sky shifts from far away (warning sign). Inside, sky and fog become one colour: no horizon, flat light.
         float reach = 1f - smoothstep(radius(d), radius(d) + 260f, (float) dist);
+        // As the front looms (visible from the warning phase on), the light dims and takes the storm's colour before
+        // it arrives: strongest when the wall is close and towering over you.
+        float front = d.phase == Phase.WARNING ? 0.25f + 0.75f * d.phaseProgress : s;
+        float looming = front * (1f - smoothstep(radius(d) * 0.9f, radius(d) + 160f, (float) dist)) * (1f - in);
         out.sky(fogColor, s * in);
-        out.sky(p.sky, s * reach * 0.7f * (1f - in));
-        out.clouds(p.clouds, s * Math.max(in, reach * 0.7f));
-        out.fogColor(fogColor, s * Math.max(in, reach * 0.5f));
+        out.sky(p.sky, Math.max(s * reach * 0.7f, looming * 0.85f) * (1f - in));
+        out.clouds(p.clouds, Math.max(s * Math.max(in, reach * 0.7f), looming));
+        out.fogColor(fogColor, Math.max(s * Math.max(in, reach * 0.5f), looming * 0.6f));
         float dark = p.darkness * (0.5f + 0.25f * (d.intensity - 1)) * (0.85f + 0.3f * Mth.clamp(g - 0.7f, 0f, 1f));
-        out.darken(s * Math.max(in, reach * 0.3f) * dark);
+        out.darken(Math.max(s * Math.max(in, reach * 0.3f), looming * 0.6f) * dark);
 
         boolean sheltered = sheltered(Minecraft.getInstance().level, cam);
         // Fog end: thick inside (fogNear at intensity 1 .. fogFar at 5), pulsing with the gusts the way visibility
@@ -120,10 +135,19 @@ public abstract class WindStormVisual implements DisasterVisual {
         if (d.phase == Phase.WARNING) amount *= 0.6f;
         out.fog(fogEnd, amount);
 
+        State st = d.visualState instanceof State x ? x : null;
+        float expo = st == null ? 1f : st.exposure;
         if (!sheltered) {
-            float buffet = s * in * (0.03f + 0.02f * d.intensity) * Mth.clamp((g - 0.7f) * 1.6f, 0.2f, 1f);
+            // Buffeting: you feel the gust fronts, less so in the lee of a wall.
+            float buffet = s * in * expo * (0.03f + 0.025f * d.intensity) * Mth.clamp((g - 0.7f) * 1.6f, 0.2f, 1.2f);
             out.shake(buffet);
-            out.fovPulse(s * in * 0.25f * Mth.clamp(g - 0.8f, 0f, 1f));
+            out.fovPulse(s * in * expo * 0.3f * Mth.clamp(g - 0.8f, 0f, 1f));
+        }
+        if (st != null && st.impact > 0) {
+            // The front hits: a hard jolt that settles over a second and a half.
+            float k = st.impact / 30f;
+            out.shake(k * k * (0.35f + 0.08f * d.intensity));
+            out.fovPulse(k);
         }
     }
 
@@ -135,6 +159,10 @@ public abstract class WindStormVisual implements DisasterVisual {
         d.visualState = st;
         Vec3 cam = camera.position();
         st.sheltered = sheltered(level, cam);
+        double wx = d.data(WindStormDisaster.D_WIND_X), wz = d.data(WindStormDisaster.D_WIND_Z);
+        double wl = Math.max(1.0e-3, Math.sqrt(wx * wx + wz * wz));
+        st.exposure = StormWind.exposure(level, cam.x, cam.y - 1.5, cam.z, wx / wl, wz / wl);
+        if (st.impact > 0) st.impact--;
         Palette p = palette(d);
         tickSounds(d, st, p, cam);
         spawnParticles(d, level, camera, cam, p);
@@ -169,7 +197,7 @@ public abstract class WindStormVisual implements DisasterVisual {
         }
         int red = d.data(WindStormDisaster.D_VARIANT) > 0.5f ? WindParticle.RED : 0;
         float speed = Math.max(0.1f, d.data(WindStormDisaster.D_WIND_SPEED));
-        float g = gust(d);
+        float g = gust(d, cam);
         int id = d.id;
 
         if (in > 0.01f && s > 0.03f) {
@@ -271,6 +299,19 @@ public abstract class WindStormVisual implements DisasterVisual {
                 double size = (3 + 5 * frac) * (lod < 1 ? 1.6 : 1.0) * (0.8 + wallH / 200.0);
                 level.addParticle(p.haze.get(), true, true, x, y, z, id, size, (red | WindParticle.WALL) + Math.min(0.99f, frac));
             }
+            // Outflow: the gust front runs ahead of the wall as a low, fast skirt of dust / snow rolling over the ground.
+            int skirt = count((2f + d.intensity) * density * front * lod * (1f - in));
+            for (int i = 0; i < skirt; i++) {
+                double along = (RANDOM.nextDouble() * 2 - 1) * halfLength;
+                double ahead = 4 + RANDOM.nextDouble() * 26;
+                double x = c.x + ex * (edge + ahead) - ez * along;
+                double z = c.z + ez * (edge + ahead) + ex * along;
+                int surface = level.getHeight(Heightmap.Types.MOTION_BLOCKING, Mth.floor(x), Mth.floor(z));
+                double y = surface + RANDOM.nextDouble() * 2.5;
+                if (!visible(frustum, x, y, z, 0, 0)) continue;
+                level.addParticle(p.haze.get(), true, true, x, y, z, id, 0.8 + RANDOM.nextDouble() * 0.8,
+                        (red | WindParticle.WALL | WindParticle.SKIRT) + 0.05f);
+            }
         }
     }
 
@@ -292,9 +333,9 @@ public abstract class WindStormVisual implements DisasterVisual {
         double dist = horizontalDistance(d, cam);
         float s = d.strength();
         float in = inside(d, dist);
-        float g = gust(d);
+        float g = gust(d, cam);
         // Close layer: the storm surrounds you, so it isn't positional. Muffled indoors, swells with gusts.
-        st.howlVolume = s * in * (st.sheltered ? 0.4f : 1f) * (0.55f + 0.1f * d.intensity) * (0.7f + 0.3f * g);
+        st.howlVolume = s * in * (st.sheltered ? 0.4f : 0.55f + 0.45f * st.exposure) * (0.55f + 0.1f * d.intensity) * (0.7f + 0.3f * g);
         st.howlPitch = 0.85f + 0.15f * g;
         // Distant layer: low moan of the approaching / receding storm.
         float far = 1f - smoothstep(radius(d), radius(d) + 420f, (float) dist);
@@ -311,6 +352,15 @@ public abstract class WindStormVisual implements DisasterVisual {
                     x -> x.visualState instanceof State xs ? xs.distantVolume : 0, x -> 1.0);
             sounds.play(st.distant);
         }
+        // The front arrives: a roaring whoosh and a deep thump, like the moment a haboob or squall line hits.
+        if (st.prevIn >= 0 && st.prevIn < 0.5f && in >= 0.5f && s > 0.35f) {
+            st.impact = 30;
+            sounds.play(new SimpleSoundInstance(ModRegistries.WIND_GUST.get().location(), SoundSource.WEATHER,
+                    1.2f, 0.55f, RANDOM, false, 0, SoundInstance.Attenuation.NONE, cam.x, cam.y, cam.z, false));
+            sounds.play(new SimpleSoundInstance(ModRegistries.DISTANT_RUMBLE.get().location(), SoundSource.WEATHER,
+                    0.9f, 0.6f, RANDOM, false, 0, SoundInstance.Attenuation.NONE, cam.x, cam.y, cam.z, false));
+        }
+        st.prevIn = in;
         // Individual gusts whistle past while you're inside and exposed.
         if (in > 0.3f && !st.sheltered && s > 0.2f && --st.nextGust <= 0) {
             st.nextGust = 40 + RANDOM.nextInt(80);

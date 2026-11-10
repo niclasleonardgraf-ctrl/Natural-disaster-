@@ -59,6 +59,23 @@ side by side with headless screenshots (`docs/screenshots/`) and tuned until the
   upward. It is visible from the warning phase on. Inside, everything turns a dark orange-brown monochrome
   (rust-red over the badlands). Visibility drops to a few blocks and daylight dims toward dusk at high intensity.
   Sand saltates in a shin-high layer along the ground.
+- **Physics** (`StormWind`, shared by server and client so what you see is what pushes you):
+  - **Gusts:** they are fronts that sweep downwind across the land. You can watch a gust race toward you through
+    the snow or dust before it hits.
+  - **Height profile:** the wind is calmer at your feet than on a rooftop or ridge (logarithmic wind profile).
+  - **Shelter:** there's no wind under a roof. A wall casts a wind shadow that's strongest right behind it.
+  - **Entities:** they are moved by aerodynamic drag (area per mass, knockback resistance, crouching, water) against
+    ground grip. Chickens get blown about, players struggle into the gusts (crouching helps), iron golems barely
+    notice, dropped items tumble and hop downwind and pile up against walls, arrows drift in a crosswind, and boats
+    drift on the water.
+  - **Fire and crops:** open flames (fire, campfires, candles) are blown out. At intensity 3+ exposed crops are
+    killed by frost or buried by sand, and saplings and flowers get buried.
+  - **Powder snow:** deep blizzard drifts become powder snow you sink into.
+- **Cinematic beats:**
+  - As a haboob looms, the daylight dims and turns brown before it arrives.
+  - A low outflow skirt of dust or snow rolls along the ground ahead of the front.
+  - The moment the front hits you there's a roaring whoosh, a deep thump and a hard camera jolt.
+  - Buffeting and the howl follow the local gusts and fade in the lee of walls.
 - **Accumulation** spreads as a continuous blanket where players are, rather than as scattered tiles. On open ground
   it forms long ridges across the wind (sastrugi in snow, ripples and low dunes in sand); against walls it forms
   deep drifts and piles.
@@ -127,6 +144,8 @@ synthesized by `tools/gen_sounds.py`.
 - `blizzard_respects_block_toggle` / `sandstorm_respects_block_toggle`: with `blockDestruction=false` no blocks change
 - `blizzard_intensity3_tick_cost` / `sandstorm_intensity3_tick_cost`: below 2 ms/tick (measured 0.35–0.9 ms across runs)
 - `sandstorm_builds_piles`: sand drifting against a wall settles into a full sand block, open ground only gets a thin layer
+- `windstorm_lee_shelters`: over 15 s at intensity 5 an armour stand in the open is pushed ~6 blocks, one in a wall's lee 0, a dropped item ~7
+- `windstorm_weathers_fires_and_crops`: a campfire and a candle are blown out, exposed wheat is lost
 
 ## Configuration
 
@@ -210,6 +229,8 @@ and `tools/gen_block_assets.py` (sand layer blockstates, models, loot tables).
   further away it reads as one solid wall. A true volumetric dust wall would need a custom renderer.
 - The realism check compared headless screenshots against published descriptions of real blizzards and haboobs
   (WMO cloud atlas, AMS glossary, NWS). I couldn't watch video footage from the build container.
+- Wind shelter samples up to 6 blocks upwind at feet and head height. It doesn't model air flowing around corners
+  or over very tall buildings.
 - Shelter-seeking is a short random search, not a real pathfinding query. In open terrain animals just drift downwind.
 - In the test world (plains) vanilla rain still falls inside a blizzard or sandstorm, because the weather is global.
   In the storms' own biomes it falls as snow (blizzard) or not at all (desert/badlands).
