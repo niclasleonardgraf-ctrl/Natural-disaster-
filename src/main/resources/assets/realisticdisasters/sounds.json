@@ -1,0 +1,18 @@
+{
+  "disaster.tornado.roar": {
+    "subtitle": "subtitles.realisticdisasters.tornado.roar",
+    "sounds": [{ "name": "realisticdisasters:tornado_roar", "stream": true, "attenuation_distance": 96 }]
+  },
+  "disaster.tornado.distant": {
+    "subtitle": "subtitles.realisticdisasters.tornado.distant",
+    "sounds": [{ "name": "realisticdisasters:tornado_distant", "stream": true }]
+  },
+  "disaster.rumble": {
+    "subtitle": "subtitles.realisticdisasters.rumble",
+    "sounds": ["realisticdisasters:rumble1", "realisticdisasters:rumble2", "realisticdisasters:rumble3"]
+  },
+  "disaster.wind_gust": {
+    "subtitle": "subtitles.realisticdisasters.wind_gust",
+    "sounds": ["realisticdisasters:wind_gust1", "realisticdisasters:wind_gust2", "realisticdisasters:wind_gust3"]
+  }
+}
