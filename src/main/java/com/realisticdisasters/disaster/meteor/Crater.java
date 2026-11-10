@@ -50,46 +50,28 @@ final class Crater {
         RandomSource random = d.rng();
         BlockChangeQueue queue = DisasterManager.blockQueue(level);
         float r = Math.max(1.5f, radius);
-        float depth = Math.max(2.2f, r * 0.45f);   // D/5 = 0.4R; a touch deeper reads better in blocks
+        float depth = Math.max(2.2f, r * 0.42f);   // D/5 = 0.4R; a touch deeper reads better in blocks
         float above = r * 0.7f;
         int ir = Mth.ceil(r * 1.2f) + 1;
         int groundY = center.getY() - 1;           // top block of the ground that was hit
-        boolean fires = DisasterConfig.METEOR_STARTS_FIRES.getAsBoolean();
+        long seed = random.nextLong();
 
-        List<BlockPos> carve = new ArrayList<>();
-        List<BlockPos> lining = new ArrayList<>();
-        List<BlockPos> melt = new ArrayList<>();
-        // Top-down so loose blocks above the bowl are removed before what they rest on.
-        for (int y = groundY + Mth.ceil(above); y >= groundY - Mth.ceil(depth) - 2; y--) {
-            int dy = y - groundY;
-            for (int dx = -ir; dx <= ir; dx++) {
-                for (int dz = -ir; dz <= ir; dz++) {
-                    double h2 = (dx * dx + dz * dz) / (double) (r * r);
-                    double edge = 1 + (random.nextDouble() - 0.5) * 0.18;
-                    // Parabolic floor below ground, a flattened dome of cleared material above it.
-                    double s = dy <= 0 ? h2 + (-dy) / depth : h2 + (dy / (double) above) * (dy / (double) above);
-                    BlockPos p = new BlockPos(center.getX() + dx, y, center.getZ() + dz);
-                    if (s < edge) {
-                        if (!level.getBlockState(p).isAir()) carve.add(p);
-                    } else if (dy <= 0 && s < edge + 1.3 / depth) {
-                        if (h2 < 0.22) melt.add(p);
-                        else lining.add(p);
-                    }
-                }
+        // One queued change per column, centre outward: the bowl opens from the middle in a fraction of a second.
+        List<int[]> columns = new ArrayList<>();
+        for (int dx = -ir; dx <= ir; dx++) {
+            for (int dz = -ir; dz <= ir; dz++) {
+                if (dx * dx + dz * dz <= (r * 1.25) * (r * 1.25)) columns.add(new int[]{dx, dz});
             }
         }
-        for (BlockPos p : carve) queue.add(l -> apply(l, p, Blocks.AIR.defaultBlockState(), Mode.ANY));
-        for (BlockPos p : lining) {
-            float roll = random.nextFloat();
-            queue.add(l -> crush(l, p, roll));
-        }
-        for (BlockPos p : melt) {
-            BlockState to = MELT[random.nextInt(MELT.length)].defaultBlockState();
-            queue.add(l -> apply(l, p, to, Mode.SOLID_ONLY));
+        columns.sort((p1, p2) -> Integer.compare(p1[0] * p1[0] + p1[1] * p1[1], p2[0] * p2[0] + p2[1] * p2[1]));
+        for (int[] c : columns) {
+            int x = center.getX() + c[0], z = center.getZ() + c[1];
+            double h2 = (c[0] * c[0] + c[1] * c[1]) / (double) (r * r);
+            queue.add(l -> carveColumn(l, x, z, groundY, h2, depth, above, seed));
         }
 
         // The meteorite: most of the impactor vaporises, a small mass survives half-buried in the floor.
-        float coreR = 0.7f + r * 0.16f * Math.min(1.5f, size + 0.3f);
+        float coreR = 0.7f + r * 0.13f * Math.min(1.5f, size + 0.3f);
         double coreY = groundY - depth + 0.6;
         int ic = Mth.ceil(coreR);
         float oreChance = DisasterConfig.METEOR_ORE_CHANCE.get().floatValue();
@@ -109,8 +91,9 @@ final class Crater {
             }
         }
 
-        // Raised rim + ejecta blanket: thickness ~ (R/r)^3, continuous at the rim, patchy further out.
-        int rimHeight = r >= 7.5f ? 2 : 1;
+        // Raised rim + ejecta blanket (thickness ~ (R/r)^3) + burnt turf, one change per affected column.
+        // (Flying ejecta from MeteorShowerDisaster adds to this where it lands.)
+        int rimHeight = r >= 9f ? 2 : 1;
         int reach = Mth.ceil(r * 2.6f);
         for (int dx = -reach; dx <= reach; dx++) {
             for (int dz = -reach; dz <= reach; dz++) {
@@ -118,26 +101,68 @@ final class Crater {
                 if (dist < r * 0.98 || dist > r * 2.6) continue;
                 double thickness = rimHeight * Math.pow(r / Math.max(dist, r), 3) * (dist < r * 1.25 ? 1.2 : 1.0);
                 int layers = (int) thickness + (random.nextDouble() < thickness - (int) thickness ? 1 : 0);
+                boolean scorch = dist < r * 1.7;
+                if (layers == 0 && !scorch) continue;
                 int x = center.getX() + dx, z = center.getZ() + dz;
-                if (dist < r * 1.6) {
-                    // Scorched ground under and around the rim (grass burnt off).
-                    queue.add(l -> scorchSurface(l, x, z));
-                }
-                for (int k = 0; k < layers; k++) {
-                    float roll = random.nextFloat();
-                    queue.add(l -> placeEjecta(l, x, z, roll));
-                }
+                float roll = random.nextFloat();
+                queue.add(l -> {
+                    if (scorch) scorchSurface(l, x, z);
+                    for (int k = 0; k < layers; k++) placeEjecta(l, x, z, (roll + k * 0.37f) % 1f);
+                });
             }
         }
-        if (fires) {
-            int count = Math.round(r * (1.0f + d.intensity() * 0.25f));
+        if (DisasterConfig.METEOR_STARTS_FIRES.getAsBoolean()) {
+            // Thermal pulse: the fireball ignites the ground around the rim.
+            int count = Math.round(r * (1.5f + d.intensity() * 0.3f));
             for (int i = 0; i < count; i++) {
                 double a = random.nextDouble() * Math.PI * 2;
-                double dist = r * (0.9 + random.nextDouble() * 0.9);
+                double dist = r * (0.9 + random.nextDouble() * 1.1);
                 int x = Mth.floor(center.getX() + 0.5 + Math.cos(a) * dist), z = Mth.floor(center.getZ() + 0.5 + Math.sin(a) * dist);
                 queue.add(Crater.fireAt(x, z));
             }
         }
+    }
+
+    /**
+     * Excavates one column of the bowl top-down and lines what is left: crushed native rock (breccia) on the walls,
+     * melt and charred rock on the floor near the centre. Protection is checked once per column (claims and
+     * protected areas are column-shaped); block entities, unbreakable blocks and liquids are never touched.
+     */
+    private static void carveColumn(ServerLevel level, int x, int z, int groundY, double h2, float depth, float above, long seed) {
+        BlockPos top = new BlockPos(x, groundY, z);
+        if (!level.isLoaded(top)) return;
+        if (!DisasterProtection.canModify(level, top, level.getBlockState(top))) return;
+        RandomSource rnd = RandomSource.create(seed ^ (x * 341873128712L + z * 132897987541L));
+        double edge = 1 + (rnd.nextDouble() - 0.5) * 0.16;
+        // Edge columns notify neighbours (sand slumps in, water flows in); interior ones only update clients.
+        int flags = h2 > 0.55 ? Block.UPDATE_ALL : Block.UPDATE_CLIENTS;
+        BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
+        int lined = 0;
+        for (int y = groundY + Mth.ceil(above); y >= groundY - Mth.ceil(depth) - 3; y--) {
+            int dy = y - groundY;
+            double s = dy <= 0 ? h2 + (-dy) / depth : h2 + (dy / (double) above) * (dy / (double) above);
+            p.set(x, y, z);
+            BlockState st = level.getBlockState(p);
+            if (st.isAir() || st.hasBlockEntity() || !st.getFluidState().isEmpty() || st.getDestroySpeed(level, p) < 0) {
+                if (s >= edge && !st.isAir()) break;
+                continue;
+            }
+            if (s < edge + (rnd.nextDouble() - 0.5) * 0.06) {
+                level.setBlock(p, Blocks.AIR.defaultBlockState(), flags);
+            } else if (dy <= 0) {
+                // first solid block(s) under the bowl: lining
+                if (!st.isCollisionShapeFullBlock(level, p) || st.is(BlockTags.LEAVES)) break;
+                BlockState to = h2 < 0.2 ? MELT[rnd.nextInt(MELT.length)].defaultBlockState() : crushed(st, rnd.nextFloat());
+                if (to != st) level.setBlock(p, to, flags);
+                if (++lined >= 2) break;
+            }
+        }
+    }
+
+    /** What a block thrown out of the crater lands as. */
+    static BlockState crushedForEjecta(BlockState st, float roll) {
+        BlockState c = crushed(st.is(Blocks.GRASS_BLOCK) ? Blocks.DIRT.defaultBlockState() : st, roll);
+        return c.isAir() || c == st && !st.is(BlockTags.SAND) ? Blocks.COARSE_DIRT.defaultBlockState() : c;
     }
 
     /** Breccia: the native material, shattered. Rock becomes cobble/gravel/tuff, soil becomes coarse dirt/gravel. */
@@ -217,7 +242,7 @@ final class Crater {
         level.setBlock(p, to, Block.UPDATE_ALL);
     }
 
-    private static void placeOnSurface(ServerLevel level, int x, int z, BlockState to) {
+    static void placeOnSurface(ServerLevel level, int x, int z, BlockState to) {
         BlockPos column = new BlockPos(x, 0, z);
         if (!level.isLoaded(column)) return;
         BlockPos p = new BlockPos(x, level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z), z);

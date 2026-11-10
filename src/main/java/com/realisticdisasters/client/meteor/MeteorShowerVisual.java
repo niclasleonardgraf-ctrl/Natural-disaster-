@@ -82,13 +82,15 @@ public final class MeteorShowerVisual implements DisasterVisual {
         final float size;
         final long tick;
         final float[] dust;  // dust colour from the ground that was hit
+        final float craterR;
         boolean soundPlayed;
 
-        Impact(Vec3 pos, float size, long tick, float[] dust) {
+        Impact(Vec3 pos, float size, long tick, float[] dust, float craterR) {
             this.pos = pos;
             this.size = size;
             this.tick = tick;
             this.dust = dust;
+            this.craterR = craterR;
         }
     }
 
@@ -138,19 +140,24 @@ public final class MeteorShowerVisual implements DisasterVisual {
         for (Impact im : st.impacts) {
             double di = im.pos.distanceTo(cam);
             float craterR = craterBase * im.size;
-            float shockR = 8f + craterR * 4f;
-            // Shock front reaches the camera after di / WAVE_SPEED ticks; beyond it, only the ground rumble.
-            double arrival = di < shockR * 1.5 ? di / MeteorShowerDisaster.WAVE_SPEED : di / SOUND_SPEED;
-            double age = now - im.tick - arrival;
-            if (age >= 0 && age < 50) {
-                float falloff = (float) (1.0 / (1.0 + Math.pow(di / (craterR * 3.5), 2)));
-                float amp = im.size * (0.6f + d.intensity * 0.18f) * falloff * (float) Math.exp(-age / 9.0);
+            float shockR = 10f + craterR * 6f;
+            // Ground shaking travels through rock (faster) and arrives first; the air blast follows at ~17 b/t.
+            double groundArrival = di / (SOUND_SPEED * 3);
+            double blastArrival = Math.max(0, di - craterR * 0.5) / MeteorShowerDisaster.WAVE_SPEED;
+            double z = Math.max(0.5, di / craterR);           // scaled distance, as in the server's blast physics
+            double gAge = now - im.tick - groundArrival;
+            if (gAge >= 0 && gAge < 80) {
+                shake += (float) (im.size * (0.5f + d.intensity * 0.12f) * Math.min(1.0, 2.0 / z) * Math.exp(-gAge / 18.0));
+            }
+            double bAge = now - im.tick - blastArrival;
+            if (bAge >= 0 && bAge < 40 && di < shockR * 1.6) {
+                float amp = (float) (im.size * (0.9f + d.intensity * 0.2f) * Math.min(1.2, 1.5 / z) * Math.exp(-bAge / 7.0));
                 shake += amp;
-                if (di < shockR) fov = Math.max(fov, amp);
+                fov = Math.max(fov, amp);
             }
             double since = now - im.tick;
-            if (since < 1200 && di < craterR * 14) {
-                dust = Math.max(dust, im.size * (float) (1 - since / 1200.0) * (1 - (float) (di / (craterR * 14))));
+            if (since < 1200 && di < craterR * 8) {
+                dust = Math.max(dust, Math.min(1f, im.size) * (float) (1 - since / 1200.0) * (1 - (float) (di / (craterR * 8))));
             }
         }
         out.shake(shake);
@@ -205,7 +212,7 @@ public final class MeteorShowerVisual implements DisasterVisual {
             float roll = r.nextFloat();
             float[] halo = roll < 0.25f ? GREEN : roll < 0.65f ? YELLOW : new float[]{1f, 0.66f, 0.32f};
             if (ticksLeft <= 0) {
-                st.impacts.add(new Impact(target, size, now, groundDust(level, target)));
+                st.impacts.add(new Impact(target, size, now, groundDust(level, target), craterRadius(d, size)));
             } else {
                 st.incoming.add(new Incoming(target, dir, size, now + ticksLeft, halo));
             }
@@ -316,7 +323,7 @@ public final class MeteorShowerVisual implements DisasterVisual {
             Incoming m = it.next();
             if (now >= m.impactTick) {
                 it.remove();
-                Impact im = new Impact(m.target, m.size, now, groundDust(level, m.target));
+                Impact im = new Impact(m.target, m.size, now, groundDust(level, m.target), craterRadius(d, m.size));
                 st.impacts.add(im);
                 impactEffects(level, cam, im, density);
                 continue;
@@ -355,7 +362,7 @@ public final class MeteorShowerVisual implements DisasterVisual {
                 spawn(ModRegistries.METEOR_EMBER.get(), head.add(jitter(core * 0.3)), v, p -> p.drag(0.9f).life(8 + RANDOM.nextInt(10)));
             }
             // Continuous incandescent wake: densely packed glows that cool from white to orange-red behind the head.
-            int wake = Math.max(3, (int) Math.ceil(FLIGHT_SPEED / Math.max(0.25, core * 0.22)));
+            int wake = Math.max(4, (int) Math.ceil(FLIGHT_SPEED / Math.max(0.2, core * 0.14)));
             for (int i = 1; i <= wake; i++) {
                 Vec3 at = head.subtract(vel.scale(i / (double) wake));
                 glow(at, Vec3.ZERO, core * 0.9f, 7 + RANDOM.nextInt(5), new float[]{1f, 0.93f, 0.75f},
@@ -388,9 +395,10 @@ public final class MeteorShowerVisual implements DisasterVisual {
     private void impactEffects(ClientLevel level, Vec3 cam, Impact im, float density) {
         double dist = im.pos.distanceTo(cam);
         float size = im.size;
-        // Flash: vanilla sky flash (like lightning) plus a white-out for close impacts.
-        if (dist < 420) level.setSkyFlashTime(2);
-        MeteorFlashOverlay.flash(size * 0.75f * (1f - smoothstep(20f, 260f, (float) dist)));
+        float cr = im.craterR;
+        // Flash: vanilla sky flash (lights the whole landscape) plus a white-out that scales with the energy.
+        if (dist < 600) level.setSkyFlashTime(3);
+        MeteorFlashOverlay.flash(Math.min(0.95f, size * 0.9f) * (1f - smoothstep(cr * 2f, cr * 30f, (float) dist)));
 
         if (dist > 320) return;
         Vec3 p = im.pos.add(0, 0.3, 0);
@@ -398,42 +406,42 @@ public final class MeteorShowerVisual implements DisasterVisual {
         float n = density * lod;
         level.addParticle(ColorParticleOption.create(ParticleTypes.FLASH, 0xFFFFF4D8), true, true, p.x, p.y + 1, p.z, 0, 0, 0);
 
-        // Fireball: incandescent gas billowing out and up, cooling into dark smoke.
-        int fire = count((14 + size * 22) * Math.max(0.4f, n));
+        // Fireball: incandescent gas billowing out to about the crater radius and up, cooling into dark smoke.
+        int fire = count((18 + cr * 3) * Math.max(0.4f, n));
         for (int i = 0; i < fire; i++) {
-            Vec3 v = hemisphere(0.25 + RANDOM.nextDouble() * 0.45 * (0.7 + size));
-            float sz = 1.2f + size * 1.2f + RANDOM.nextFloat();
+            Vec3 v = hemisphere(0.2 + RANDOM.nextDouble() * cr * 0.09);
+            float sz = 1.2f + cr * 0.35f + RANDOM.nextFloat() * 1.5f;
             spawn(ModRegistries.METEOR_SMOKE.get(), p.add(jitter(0.6)), v, q -> q.size(sz).grow(2.4f).life(70 + RANDOM.nextInt(60))
                     .alpha(0.75f).hot(0.18f).drag(0.86f).buoyancy(0.004f).colors(0.24f, 0.22f, 0.2f, 0.3f, 0.28f, 0.26f));
         }
         // Glowing fragments and molten spray.
-        int embers = count((20 + size * 34) * n);
+        int embers = count((24 + cr * 5) * n);
         for (int i = 0; i < embers; i++) {
-            Vec3 v = hemisphere(0.3 + RANDOM.nextDouble() * 0.6 * (0.6 + size));
+            Vec3 v = hemisphere(0.3 + RANDOM.nextDouble() * (0.4 + cr * 0.06));
             spawn(ModRegistries.METEOR_EMBER.get(), p.add(jitter(0.6)), v.add(0, 0.25, 0), q -> {});
         }
         // Ejecta curtain: real fragments of the ground, thrown out in a steep cone.
         BlockState ground = level.getBlockState(BlockPos.containing(im.pos).below());
         if (!ground.isAir()) {
             ParticleOptions block = new BlockParticleOption(ParticleTypes.BLOCK, ground);
-            int clods = count((40 + size * 60) * n);
+            int clods = count((50 + cr * 10) * n);
             for (int i = 0; i < clods; i++) {
                 double a = RANDOM.nextDouble() * Math.PI * 2;
-                double out = 0.25 + RANDOM.nextDouble() * 0.55 * (0.6 + size);
+                double out = 0.25 + RANDOM.nextDouble() * (0.3 + cr * 0.07);
                 double up = out * (0.9 + RANDOM.nextDouble() * 0.6);
                 level.addParticle(block, true, true, p.x, p.y, p.z, Math.cos(a) * out, up, Math.sin(a) * out);
             }
         }
         float[] dc = im.dust;
         // Dust ring: ground-hugging base surge racing outward with the shockwave.
-        int ring = count((36 + size * 40) * n);
+        int ring = count((40 + cr * 6) * n);
         for (int i = 0; i < ring; i++) {
             double a = i / (double) Math.max(1, ring) * Math.PI * 2 + RANDOM.nextDouble() * 0.15;
-            double v = (0.7 + RANDOM.nextDouble() * 0.5) * (0.7 + size * 0.5);
-            float sz = 1.2f + size + RANDOM.nextFloat();
+            double v = (0.6 + RANDOM.nextDouble() * 0.5) * (0.5 + cr * 0.1);
+            float sz = 1.2f + cr * 0.25f + RANDOM.nextFloat();
             float sh = 0.9f + RANDOM.nextFloat() * 0.2f;
             spawn(ModRegistries.METEOR_SMOKE.get(), p.add(Math.cos(a) * 1.5, -0.1, Math.sin(a) * 1.5), new Vec3(Math.cos(a) * v, 0.02, Math.sin(a) * v),
-                    q -> q.size(sz).grow(4f).life(90 + RANDOM.nextInt(80)).alpha(0.6f).drag(0.9f)
+                    q -> q.size(sz).grow(4f).life(110 + RANDOM.nextInt(90)).alpha(0.6f).drag(0.9f)
                             .colors(dc[0] * sh, dc[1] * sh, dc[2] * sh, dc[0], dc[1], dc[2]));
         }
     }
@@ -455,10 +463,10 @@ public final class MeteorShowerVisual implements DisasterVisual {
                 float pitch = 1.1f - im.size * 0.25f + (RANDOM.nextFloat() - 0.5f) * 0.1f;
                 if (dist < 160) {
                     sounds.play(new SimpleSoundInstance(ModRegistries.METEOR_IMPACT.get().location(), SoundSource.WEATHER,
-                            1.2f + im.size * 1.2f, pitch, RANDOM, false, 0, SoundInstance.Attenuation.LINEAR,
+                            1.5f + im.craterR * 0.2f, pitch, RANDOM, false, 0, SoundInstance.Attenuation.LINEAR,
                             im.pos.x, im.pos.y + 1, im.pos.z, false));
                 }
-                float farVol = (0.5f + 0.6f * im.size) * (1f - smoothstep(80f, 700f, (float) dist)) * smoothstep(8f, 60f, (float) dist + 20f);
+                float farVol = (0.6f + 0.6f * im.size) * (1f - smoothstep(80f, 900f, (float) dist)) * smoothstep(8f, 60f, (float) dist + 20f);
                 if (farVol > 0.02f) {
                     Vec3 at = cam.add(im.pos.subtract(cam).normalize().scale(Math.min(dist, 14)));
                     sounds.play(new SimpleSoundInstance(ModRegistries.METEOR_IMPACT_DISTANT.get().location(), SoundSource.WEATHER,
@@ -469,13 +477,13 @@ public final class MeteorShowerVisual implements DisasterVisual {
             float lod = dist < 64 ? 1f : 0.5f;
             float[] dc = im.dust;
             // Dust plume: a column of ground dust and smoke rising over the first seconds.
-            if (age < 40) {
-                int plume = count((1.5f + im.size * 2.5f) * density * lod * (1f - age / 40f));
+            if (age < 50) {
+                int plume = count((1.5f + im.craterR * 0.35f) * density * lod * (1f - age / 50f));
                 for (int i = 0; i < plume; i++) {
-                    Vec3 at = im.pos.add(jitter(0.8 + im.size));
-                    float sz = 1.4f + im.size * 1.2f;
+                    Vec3 at = im.pos.add(jitter(0.5 + im.craterR * 0.3));
+                    float sz = 1.4f + im.craterR * 0.22f;
                     float sh = 0.75f + RANDOM.nextFloat() * 0.2f;
-                    spawn(ModRegistries.METEOR_SMOKE.get(), at, new Vec3(0, 0.12 + RANDOM.nextDouble() * 0.18 * (0.6 + im.size), 0),
+                    spawn(ModRegistries.METEOR_SMOKE.get(), at, new Vec3(0, 0.12 + RANDOM.nextDouble() * (0.1 + im.craterR * 0.02), 0),
                             q -> q.size(sz).grow(3.5f).life(200 + RANDOM.nextInt(160)).alpha(0.45f).drag(0.965f).buoyancy(0.0015f)
                                     .colors(dc[0] * sh, dc[1] * sh, dc[2] * sh, dc[0] * 0.9f, dc[1] * 0.9f, dc[2] * 0.9f));
                 }
@@ -555,9 +563,10 @@ public final class MeteorShowerVisual implements DisasterVisual {
         return Math.max(20f, d.data(MeteorShowerDisaster.D_SCATTER));
     }
 
-    /** Mirrors MeteorShowerDisaster#craterRadius without the server-only config scale. */
+    /** Crater radius as the server computes it (its base is synced, so config scaling is respected). */
     private static float craterRadius(ClientDisaster d, float size) {
-        return (1.6f + d.intensity * 0.75f) * size;
+        float base = d.data(MeteorShowerDisaster.D_CRATER);
+        return (base > 0 ? base : 3f + d.intensity * 1.4f) * size;
     }
 
     private static Vec3 camPos() {

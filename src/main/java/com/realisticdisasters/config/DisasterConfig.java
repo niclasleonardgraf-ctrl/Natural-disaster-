@@ -43,6 +43,8 @@ public final class DisasterConfig {
     public static final ModConfigSpec.DoubleValue METEOR_ORE_CHANCE;
     public static final ModConfigSpec.ConfigValue<List<? extends String>> METEOR_ORES;
     public static final ModConfigSpec.BooleanValue METEOR_STARTS_FIRES;
+    public static final ModConfigSpec.IntValue METEOR_MAX_EJECTA;
+    public static final ModConfigSpec.BooleanValue METEOR_BLAST_DAMAGE;
 
     static {
         B.push("general");
@@ -111,6 +113,10 @@ public final class DisasterConfig {
                         () -> "minecraft:iron_ore*1", o -> o instanceof String);
         METEOR_STARTS_FIRES = B.comment("Impacts set fire to the crater rim (only if block destruction is on).")
                 .define("startsFires", true);
+        METEOR_MAX_EJECTA = B.comment("Max blocks thrown out of each crater as flying ejecta (real falling blocks). 0 = none.")
+                .defineInRange("maxEjecta", 40, 0, 200);
+        METEOR_BLAST_DAMAGE = B.comment("The blast shatters glass, strips leaves and flattens plants around impacts (only if block destruction is on).")
+                .define("blastDamage", true);
         B.pop();
     }
 
