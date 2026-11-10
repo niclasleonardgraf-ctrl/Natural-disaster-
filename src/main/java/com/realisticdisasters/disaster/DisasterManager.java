@@ -213,6 +213,8 @@ public final class DisasterManager {
     // ------------------------------------------------------------------ dev hook
 
     private static boolean autostarted;
+    private static int devStage;
+    private static long devStageTime;
 
     /**
      * Development only: {@code -Drealisticdisasters.autostart=tornado,3,BUILDUP} starts a disaster 40 blocks in front
@@ -224,20 +226,32 @@ public final class DisasterManager {
         if (spec == null || level.players().isEmpty()) return;
         ServerPlayer player = level.players().getFirst();
         if (player.tickCount < 60) return;
+        // Stage 1: move far away from whatever is at spawn (e.g. GameTest arenas) and let the terrain load there.
+        if (devStage == 0) {
+            devStage = 1;
+            devStageTime = level.getGameTime();
+            player.connection.teleport(player.getX() + 600, level.getMaxY() - 20, player.getZ(), 0f, -12f);
+            player.getAbilities().flying = true;
+            player.onUpdateAbilities();
+            return;
+        }
+        if (level.getGameTime() - devStageTime < 80) return;
         autostarted = true;
         String[] p = spec.split(",");
         try {
             DisasterType type = DisasterType.valueOf(p[0].trim().toUpperCase(java.util.Locale.ROOT));
             int intensity = p.length > 1 ? Integer.parseInt(p[1].trim()) : 3;
             // Move the viewer to open ground (dev worlds often spawn you next to structures), looking south, tilted up.
-            double px = player.getX() + 160, pz = player.getZ() - 40;
+            double px = player.getX(), pz = player.getZ();
             int py = level.getHeight(Heightmap.Types.MOTION_BLOCKING, Mth.floor(px), Mth.floor(pz));
             // Stand on a small dirt pillar so trees don't block the view.
             for (int i = 0; i < 6; i++) level.setBlockAndUpdate(new BlockPos(Mth.floor(px), py + i, Mth.floor(pz)),
                     net.minecraft.world.level.block.Blocks.COARSE_DIRT.defaultBlockState());
             py += 6;
+            player.getAbilities().flying = false;
+            player.onUpdateAbilities();
             player.connection.teleport(px, py, pz, 0f, -12f);
-            Vec3 at = new Vec3(px, py, pz + 105);
+            Vec3 at = new Vec3(px, py, pz + 75);
             plantDevForest(level, at, Mth.floor(px), Mth.floor(pz));
             int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, Mth.floor(at.x), Mth.floor(at.z));
             Disaster d = start(level, type, new Vec3(at.x, y, at.z), intensity);
@@ -279,6 +293,7 @@ public final class DisasterManager {
         LEVELS.clear();
         nextId = 1;
         autostarted = false;
+        devStage = 0;
     }
 
     private DisasterManager() {}

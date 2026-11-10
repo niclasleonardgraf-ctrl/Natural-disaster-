@@ -88,10 +88,15 @@ public final class TornadoVisual implements DisasterVisual {
      * the column snakes slowly, so it never reads as a straight pillar.
      */
     public static Vec3 axisOffset(ClientDisaster d, float h) {
+        return axisOffset(d, h, EffectsManager.ticks());
+    }
+
+    /** {@link #axisOffset(ClientDisaster, float)} at an explicit (partial-tick) time, for smooth mesh rendering. */
+    public static Vec3 axisOffset(ClientDisaster d, float h, double time) {
         float core = coreRadius(d);
         float hx = d.data(TornadoDisaster.D_HEADING_X), hz = d.data(TornadoDisaster.D_HEADING_Z);
         double hc = Mth.clamp(h, 0f, 1f);
-        double t = (EffectsManager.ticks() + d.id * 977) * 0.035;
+        double t = (time + d.id * 977) * 0.035;
         double tilt = core * 1.8 * Math.pow(hc, 1.3) * (0.4 + 0.6 * d.strength());
         double belly = Math.sin(hc * Math.PI);
         double sway = core * 0.6 * Math.sin(t + hc * 3.0) * belly;
@@ -120,6 +125,13 @@ public final class TornadoVisual implements DisasterVisual {
 
         float td = touchdown(d);
         float core = coreRadius(d);
+        // Inside / at the edge of the vortex: visibility collapses into dark, debris-laden murk.
+        float inside = (1f - smoothstep(core * 1.2f, core * 3f, (float) dist)) * s * td;
+        if (inside > 0.01f) {
+            out.fog(10f + (float) dist * 0.6f, inside);
+            out.fogColor(0x3A3631, inside * 2f);
+            out.darken(inside * 0.6f);
+        }
         float shakeNear = 1f - smoothstep(core, core * 9f, (float) dist);
         float shakeFar = 1f - smoothstep(core * 9f, 160f, (float) dist);
         out.shake(s * td * (d.intensity / 5f) * (shakeNear * 0.9f + shakeFar * 0.12f));
@@ -206,14 +218,15 @@ public final class TornadoVisual implements DisasterVisual {
         // Condensation funnel lowering from the cloud base.
         float bottom = (1f - td) * 0.78f;
         if (td > 0.02f || d.phase == Phase.BUILDUP) {
-            int funnelCount = count(budget * 1.5f * s);
+            boolean mesh = ClientConfig.MESH_FUNNEL.getAsBoolean();
+            int funnelCount = count(budget * (mesh ? 0.25f : 1.5f) * s);
             for (int i = 0; i < funnelCount; i++) {
                 // bias toward the lower funnel, where it is thin and needs density to read as solid
                 float u = RANDOM.nextFloat();
                 // stop below the flare: the soft wall cloud takes over there (crisp funnel puffs look like bubbles)
                 float h = bottom + (u * u) * (0.8f - bottom);
                 // mostly a tight outer shell (crisp edge) plus some fill
-                if (RANDOM.nextFloat() < 0.5f) {
+                if (!mesh && RANDOM.nextFloat() < 0.5f) {
                     // streaked surface panels: the funnel's skin with helical striations
                     spawnAt(level, ModRegistries.FUNNEL_SURFACE.get(), d, h, funnelRadius(d, h) * 0.96, 1f, height);
                 } else {

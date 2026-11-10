@@ -50,6 +50,24 @@ Implementation notes: oriented quads come from overriding `VortexParticle#extrac
 large particles by their real size (vanilla culls by centre point). All quad particles share vanilla's
 16384-particle queue, so the spawn budget keeps the storm around 11k particles.
 
+### 3D funnel mesh
+The funnel is real 3D geometry, generated in code every frame (`client/tornado/FunnelRenderer`). Nested tube meshes
+(about 44 rings × 64 segments each) follow the snaking, tilted funnel axis:
+1. an opaque condensation core
+2. a streaky outer shell
+3. a faint outer veil
+4. a dust sheath at the ground
+
+Each layer scrolls its texture around the funnel (rotation from the wind model's angular speed) and upward (rising
+air), with a slight helical slant for striations. The mesh has an irregular, living outline, strong side lighting
+(bright lit flank, dark shadow flank), soft silhouettes, and reacts to lightning. Up close it fades into dark,
+debris-laden murk, because inside a tornado you cannot see a funnel wall. Textures are seamless 256×512 / 256×256
+procedural PNGs with smooth filtering (`.mcmeta` blur).
+
+It is submitted through NeoForge's `SubmitCustomGeometryEvent` into vanilla's translucent entity pipeline, so fog,
+lightmap and shader packs handle it like other world geometry. `meshFunnel = false` in the client config switches back
+to the particle-only funnel (e.g. if a shader pack misbehaves).
+
 ### Tornado physics
 One wind model (`disaster/tornado/TornadoWind`) drives everything, on the server and on the client:
 - **Wind field:** wind speed rises to a peak at the core radius and falls off outside it (a Rankine vortex). Air

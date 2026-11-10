@@ -236,6 +236,83 @@ def rain_shaft(seed, size=64):
     return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
 
 
+# ----------------------------------------------------------------------------- 3D funnel mesh textures
+# Seamlessly tileable in both directions (they scroll around and up the funnel), smooth (blur filtering).
+
+def pfbm(w, h, rng, octaves=5, base_x=4, base_y=4, persistence=0.5):
+    """Periodic fractal value noise: tiles seamlessly in x and y."""
+    import numpy as np
+    out = np.zeros((h, w))
+    amp, total = 1.0, 0.0
+    for o in range(octaves):
+        cx, cy = base_x * 2 ** o, base_y * 2 ** o
+        grid = rng.random((cy, cx))
+        ys = np.arange(h) / h * cy
+        xs = np.arange(w) / w * cx
+        yi, xi = ys.astype(int), xs.astype(int)
+        yf, xf = ys - yi, xs - xi
+        yf, xf = yf * yf * (3 - 2 * yf), xf * xf * (3 - 2 * xf)
+        y0, y1 = yi % cy, (yi + 1) % cy
+        x0, x1 = xi % cx, (xi + 1) % cx
+        g00, g01 = grid[np.ix_(y0, x0)], grid[np.ix_(y0, x1)]
+        g10, g11 = grid[np.ix_(y1, x0)], grid[np.ix_(y1, x1)]
+        top = g00 + (g01 - g00) * xf[None, :]
+        bot = g10 + (g11 - g10) * xf[None, :]
+        out += (top + (bot - top) * yf[:, None]) * amp
+        total += amp
+        amp *= persistence
+    return out / total
+
+
+def funnel_core_texture(seed, w=256, h=512):
+    """Dense condensation: fine vertical striations, larger turbulent cells, subtle bright/dark banding."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    streaks = pfbm(w, h, rng, octaves=5, base_x=24, base_y=2)        # stretched: long vertical streaks
+    cells = pfbm(w, h, rng, octaves=5, base_x=4, base_y=6)
+    fine = pfbm(w, h, rng, octaves=4, base_x=32, base_y=32)
+    light = 0.55 + 0.72 * (streaks - 0.5) + 0.42 * (cells - 0.5) + 0.15 * (fine - 0.5)
+    alpha = np.clip(0.88 + 0.5 * (cells - 0.5) + 0.25 * (streaks - 0.5), 0.6, 1.0)
+    return to_rgba(light, alpha)
+
+
+def funnel_veil_texture(seed, w=256, h=256):
+    """Wispy outer veil: torn streaks with gaps, so the inner core shows through in places."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    streaks = pfbm(w, h, rng, octaves=5, base_x=16, base_y=2)
+    breakup = pfbm(w, h, rng, octaves=4, base_x=4, base_y=4)
+    a = np.clip((streaks - 0.42) * 3.0, 0, 1) * np.clip((breakup - 0.3) * 2.2, 0, 1)
+    light = 0.62 + 0.4 * (streaks - 0.5) + 0.2 * (breakup - 0.5)
+    return to_rgba(light, np.clip(a, 0, 1))
+
+
+def debris_sheath_texture(seed, w=256, h=256):
+    """Churning debris/dust: billowy turbulent texture with dark grit (tinted brown-grey in code)."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    billow = 1 - np.abs(pfbm(w, h, rng, octaves=6, base_x=6, base_y=4) * 2 - 1)   # ridged = billowy
+    grit = pfbm(w, h, rng, octaves=3, base_x=16, base_y=16)
+    light = 0.5 + 0.55 * (billow - 0.5) - 0.12 * (grit - 0.5)
+    a = np.clip(0.35 + 0.9 * (billow - 0.35), 0, 1)
+    return to_rgba(light, a)
+
+
+def to_rgba(light, alpha):
+    import numpy as np
+    l = (np.clip(light, 0, 1) * 255).astype("uint8")
+    return Image.fromarray(np.dstack([l, l, l, (np.clip(alpha, 0, 1) * 255).astype("uint8")]), "RGBA")
+
+
+def write_entity_texture(img, name):
+    import json
+    d = os.path.join(ROOT, "assets", "realisticdisasters", "textures", "entity")
+    os.makedirs(d, exist_ok=True)
+    img.save(os.path.join(d, name + ".png"))
+    with open(os.path.join(d, name + ".png.mcmeta"), "w") as f:
+        json.dump({"texture": {"blur": True}}, f)   # smooth filtering, repeat wrapping (default)
+
+
 def write(img, name):
     os.makedirs(PARTICLES, exist_ok=True)
     img.save(os.path.join(PARTICLES, name + ".png"))
@@ -253,6 +330,11 @@ def main():
         write(soft_cloud(200 + i, density=0.85, wispy=True), f"dust_cloud_{i}")
         write(rain_shaft(400 + i), f"rain_shaft_{i}")
         write(debris_texture(300 + i), f"storm_debris_{i}")
+
+    # 3D funnel mesh
+    write_entity_texture(funnel_core_texture(1000), "funnel_core")
+    write_entity_texture(funnel_veil_texture(1001), "funnel_veil")
+    write_entity_texture(debris_sheath_texture(1002), "debris_sheath")
 
     # Realistic rain (overrides vanilla's blue rain texture; applies to all rain in the game).
     env = os.path.join(ROOT, "assets", "minecraft", "textures", "environment")
