@@ -4,6 +4,15 @@ import com.realisticdisasters.RealisticDisasters;
 import com.realisticdisasters.client.particle.VortexParticle;
 import com.realisticdisasters.client.particle.QuakeDustParticle;
 import com.realisticdisasters.client.particle.WildfireParticle;
+import com.realisticdisasters.client.volcano.AshParticle;
+import com.realisticdisasters.client.volcano.SmokeLayer;
+import com.realisticdisasters.client.volcano.SparkParticle;
+import com.realisticdisasters.client.volcano.VoxelCloudRenderer;
+import net.neoforged.neoforge.client.event.RegisterRenderPipelinesEvent;
+import com.realisticdisasters.client.volcano.VolcanoVisual;
+import com.realisticdisasters.disaster.volcano.LavaBombEntity;
+import net.minecraft.client.renderer.entity.ThrownItemRenderer;
+import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import com.realisticdisasters.network.DisasterRemovePayload;
 import com.realisticdisasters.network.DisasterSyncPayload;
 import com.realisticdisasters.registry.ModRegistries;
@@ -23,6 +32,10 @@ public class RealisticDisastersClient {
         container.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new);
         modBus.addListener(RealisticDisastersClient::registerPayloadHandlers);
         modBus.addListener(RealisticDisastersClient::registerParticles);
+        modBus.addListener(RealisticDisastersClient::registerEntityRenderers);
+        modBus.addListener((RegisterRenderPipelinesEvent e) -> e.registerPipeline(SmokeLayer.PIPELINE));
+        modBus.addListener(VoxelCloudRenderer::registerPipelines);
+        LavaBombEntity.CLIENT_TRAIL = VolcanoVisual::bombTrail;
     }
 
     private static void registerPayloadHandlers(RegisterClientPayloadHandlersEvent event) {
@@ -51,5 +64,15 @@ public class RealisticDisastersClient {
         event.registerSpriteSet(ModRegistries.FIRE_TONGUE.get(), s -> WildfireParticle.provider(WildfireParticle.Kind.FLAME, s));
         event.registerSpriteSet(ModRegistries.FIRE_WHIRL.get(), s -> WildfireParticle.provider(WildfireParticle.Kind.WHIRL_FLAME, s));
         event.registerSpriteSet(ModRegistries.WHIRL_SMOKE.get(), s -> WildfireParticle.provider(WildfireParticle.Kind.WHIRL_SMOKE, s));
+        event.registerSpriteSet(ModRegistries.ASH_CLOUD.get(), s -> AshParticle.provider(AshParticle.Kind.PLUME, s));
+        event.registerSpriteSet(ModRegistries.ASH_TRAIL.get(), s -> AshParticle.provider(AshParticle.Kind.TRAIL, s));
+        event.registerSpriteSet(ModRegistries.ASH_FALL.get(), s -> AshParticle.provider(AshParticle.Kind.FALL, s));
+        event.registerSpriteSet(ModRegistries.ASH_CURTAIN.get(), s -> AshParticle.provider(AshParticle.Kind.CURTAIN, s));
+        event.registerSpriteSet(ModRegistries.LAVA_SPARK.get(), SparkParticle::provider);
+    }
+
+    private static void registerEntityRenderers(EntityRenderersEvent.RegisterRenderers event) {
+        // Lava bombs render as a tumbling, full-bright magma block.
+        event.registerEntityRenderer(ModRegistries.LAVA_BOMB.get(), ctx -> new ThrownItemRenderer<>(ctx, 2.6f, true));
     }
 }

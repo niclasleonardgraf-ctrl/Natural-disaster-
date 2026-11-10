@@ -1,6 +1,7 @@
 {
   "replace": false,
   "values": [
-    "realisticdisasters:scorched_earth"
+    "realisticdisasters:scorched_earth",
+    "realisticdisasters:volcanic_ash"
   ]
 }

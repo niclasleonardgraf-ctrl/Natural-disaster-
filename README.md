@@ -14,6 +14,8 @@ Full design spec: [`docs/SPEC.md`](docs/SPEC.md).
 | Wildfire, Volcano, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
 | Wildfire | ✅ complete |
 | Earthquake, Volcano, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
+| Volcano | ✅ complete |
+| Earthquake, Wildfire, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
 
 ## Commands (op level 2)
 
@@ -237,6 +239,56 @@ burns, a boreal forest after fire):
 - **Fire whirls:** a narrow, spinning column of flame leaning with the wind and snaking with height, inside a rotating
   smoke column, with a jet-like roar. Standing close shakes the camera.
 - Blocks (charred log, scorched earth, scorched leaves) stay 16x16 so they sit naturally among vanilla blocks.
+## Testing a volcano in-game
+
+1. `./gradlew runClient`, create a world with cheats on.
+2. `/disaster start volcano <1-5>` and watch from a distance. The size scales with intensity: intensity 1 is a ~10-block
+   cinder cone, intensity 5 grows a ~130-block mountain with a ~200-block base radius (as big as the largest vanilla
+   mountains). A big volcano that would start right next to you moves its vent away, so you end up on its lower flank.
+3. Phases: **warning** (~20 s: tremors, deep rumbles, steaming fissures tear open, animals flee, villagers hide),
+   **buildup** (15–30 s: the mountain starts rising out of the ground, the crater fills with lava, the column starts),
+   **peak** (60–120 s: the mountain keeps growing, lava bombs, blasts, lava rivers, the full eruption column with its
+   umbrella cloud, ash fall, lightning, pyroclastic flows at intensity 3+, a full column collapse at intensity 5),
+   **aftermath** (~30–60 s: activity fades, the column detaches and drifts away).
+4. Try `/time set midnight` for the glowing night look, and stand downwind to see the ash fall and ash blanket.
+
+Dev shortcut: set `realisticdisasters.autostart` in the `clientVisualTest` run to `volcano,5,PEAK`.
+
+### What the volcano looks like
+Modelled on real eruptions (Kīlauea fountains, Stromboli/Rinjani bursts, Taal, Sakurajima, Pinatubo, St. Helens) and
+compared with reference photos. Everything is built to sit seamlessly in Minecraft:
+- **The mountain** is real terrain: a stratovolcano that grows out of the ground during the eruption, keeping its shape
+  (concave like Mount Fuji, steep near the summit, flattening at the foot) with a bowl-shaped summit crater, radial
+  gullies and ridges, an irregular footprint, dark scoria on the upper cone, grey tephra and old lava channels lower down,
+  and layered strata of lava rock and tephra inside.
+- **Ash clouds are voxel clouds**, drawn the way Minecraft draws its own clouds: solid, shaded boxes (bright tops,
+  darker sides and undersides) instead of flat smoke sprites. The column is a dark jet at the vent that widens with height
+  and bends downwind; its billows rise and churn; it spreads into an umbrella cloud that drifts far downwind; cloud above
+  shadows the cloud below; the lava fountain lights its base orange at night and lightning flashes light it up.
+- **Pyroclastic flows** roll down the mountain as a ground-hugging voxel cloud with a tall billowing head.
+- **Lava fountain and bombs**: incandescent spatter that cools in flight from yellow to orange, red and black; bombs
+  trace glowing spark arcs and smoke trails. Steam and gas rise off fresh lava; lava meeting water throws up white steam.
+- Under the ash cloud the daylight dims to a warm brown-grey (following the time of day), visibility drops and ash falls.
+
+### Volcano physics
+- **Growing mountain**: built solid, column by column under a time budget per tick. The ground rises under whatever
+  stands on it: entities are lifted onto the new surface instead of being buried. Plants, trees, snow and water get buried;
+  buildings stay embedded. The vent and its crater lava lake rise with the summit.
+- **Lava**: the crater lava lake overflows into lava rivers that run down the flanks, braid and spread into lobes; they
+  crust over first (glowing magma blocks) and then cool into basalt/blackstone, batched.
+- **Lava bombs** fly ballistically, burn and hurt on impact, leave small craters and ignite only what can burn.
+- **Blasts** throw out bursts of bombs and a pressure wave that knocks back everything near the crater.
+- **Pyroclastic flows**: part of the column collapses into a hot ash avalanche racing down a sector of the mountain
+  (a full 360° collapse at intensity 5). It accelerates on steep slopes and slows on flat ground (~50–150 km/h), kills
+  and ignites what it catches (a roof halves the heat), shoves things ahead of its front, strips the leaves off trees and
+  sets the charred trunks alight, scorches the ground, flash-melts snow and leaves an ash deposit.
+- **Ash fall**: ash settles out of the drifting cloud as a new block, *Volcanic Ash* (layers 1–8 like snow, doesn't
+  melt). It is thickest near the vent along the wind axis and thins with distance, like a real isopach map, and buries plants.
+- **Snow and ice melt** around the mountain; the meltwater runs off downhill (lahars).
+- **Precursors**: steaming fissures with glowing magma at the bottom tear open near the future vent during the warning.
+- **Volcanic lightning** (visual only, never starts fires) strikes around the vent during strong eruptions.
+- **Mobs flee**, villagers take shelter. All block changes respect `blockDestruction`, spawn protection, protected areas
+  and claims.
 
 ## Automated tests
 
@@ -262,6 +314,14 @@ burns, a boreal forest after fire):
 - `wildfire_whirl_lofts_objects`: a fire whirl pulls in and lofts items
 - `wildfire_intensity3_tick_cost`: on a 48x48 field (~1000 columns burnt in 15 s) the cost stays below 2 ms/tick
   (measured 0.3–0.9 ms)
+- `volcano_erupts`: the mountain grows, a cow standing on it is lifted (not buried), bombs fly, a blast happens, lava flows
+- `volcano_lava_cools`: lava crusts over into magma and then turns into basalt/blackstone
+- `volcano_respects_block_toggle`: with `blockDestruction=false` it still erupts but no blocks change
+- `volcano_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.8–1.5 ms with the mountain growing)
+- `volcano_pyroclastic_flow`: a flow hits animals around the vent and leaves an ash deposit
+- `volcano_mountain_scales`: size grows with intensity (mountain-sized at 5); a growing mountain has its summit over the vent
+
+Volcano tests confine the volcano to an 18-block radius (`confineForTest`) because GameTest arenas are only 37 blocks apart.
 
 ## Configuration
 
@@ -274,6 +334,9 @@ burns, a boreal forest after fire):
   hills / savanna, savanna plateau and desert.
   The wildfire section has the dry-biome bonus, max ignitions per tick, max area, spread speed, duration scale and
   whether rain slows it.
+  The tornado section also has max debris, duration scale, and whether it changes the weather. The volcano section has
+  max bombs, duration scale, mountain growth, lava flows, cooling time, volcanic lightning, pyroclastic flows and ash fall; its default biomes are `#minecraft:is_mountain`
+  and the windswept hills.
 - `config/realisticdisasters-client.toml`: camera shake on/off and strength, FOV pulse, particle density, fog, sky tint.
   Also editable in-game: Mods → Realistic Natural Disasters → Config.
 
@@ -289,6 +352,10 @@ common (server-safe)
   disaster/earthquake/EarthquakeDisaster   tremor curve, fissures, support-based crumbling
   disaster/wildfire/WildfireDisaster   grid fire front, fuel model, charring; WildfireFlameBlock (self-extinguishing),
                              CharredLogBlock / ScorchedEarthBlock (smouldering state), scorched leaves
+  disaster/volcano/VolcanoDisaster  eruption, bombs, blasts, lava, cooling, snow melt, fissures, lightning
+  disaster/volcano/VolcanoEdifice   the growing mountain (time-budgeted builder, shape, strata, lifting entities)
+  disaster/volcano/PyroclasticFlow  hot ash avalanche;  AshFall + AshLayerBlock: ash deposits
+  disaster/volcano/LavaBombEntity   projectile, rendered as a full-bright magma block
   network/                   DisasterSyncPayload (every 4 ticks), DisasterRemovePayload
   command/DisasterCommand, config/, registry/ModRegistries (sounds, particles, damage type key)
 client (Dist.CLIENT only)
@@ -299,6 +366,9 @@ client (Dist.CLIENT only)
   particle/QuakeDustParticle  rock dust: low ground puffs (quake_dust) and billowing collapse clouds (collapse_dust)
 mixin/CameraMixin            lets the earthquake offset the camera position
   DisasterVisual(s)          per-type particles + sounds (tornado/TornadoVisual, wildfire/WildfireVisual)
+  DisasterVisual(s)          per-type particles + sounds (tornado/TornadoVisual, volcano/VolcanoVisual)
+  volcano/VoxelCloud(+Renderer)  volumetric voxel clouds drawn like vanilla clouds (SubmitCustomGeometryEvent,
+                             own pipelines + shader with vanilla fog); SparkParticle lava spatter; AshParticle ash flakes
   particle/VortexParticle    funnel / debris / dust particles that orbit their disaster
   particle/WildfireParticle  smoke, convection billows, smoke layer, smoulder wisps, flame tongues, embers, ash
   sound/DisasterLoopSound    cross-fading positional (near) and non-attenuated (far) loops
@@ -349,6 +419,18 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
   `DisasterManager` asks it instead of the flat weight. Wildfires use it to favour hot, dry biomes (`dryBiomeBonus`).
 - `tools/gen_structures.py` now writes block-state properties correctly (they used to end up in the block name).
   `tornado_arena.nbt` was not regenerated, so the tornado tests run on exactly the same arena as before.
+- **Volcano lava** is placed as real lava source blocks along a downhill path chosen by the volcano, so vanilla
+  lava spreads a few blocks from each of them and can start fires nearby. Lava placement keeps a 3-block margin from
+  protected areas for that reason. When a source cools into rock, the flowing lava it fed drains away by itself.
+- **Volcano ash clouds are voxels**, not sprites: soft smoke sprites looked pasted-in and showed sorting artifacts, so the
+  big clouds are solid shaded boxes like vanilla clouds (sized 3–8 blocks per cell with the eruption). Small particles
+  remain only for glowing spatter and fine ash fall.
+- **Smoke render layer**: ash and gas use their own particle pipeline (vanilla's particle shader with translucent
+  blending, but no depth writes, registered through `RegisterRenderPipelinesEvent`). Vanilla's translucent particles
+  write depth unsorted, which punched sky-coloured holes into the dense ash column.
+- **Blast sounds** are delayed by distance (about 17 blocks per tick) so the boom arrives after the flash.
+- **Volcano cone** is decided once the vent area is loaded: it's built only where the ground within its radius varies by
+  at most 3 blocks. On rough or mountain ground the eruption comes out of a magma vent in the existing terrain.
 
 ## Known issues
 
@@ -387,3 +469,13 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
   stepped edges. 128 px textures and the near-camera fade keep this small.
 - Wildfire: the flame block's animated texture is high resolution, unlike vanilla's 16x16 fire. That's deliberate
   (realism first) but it is the one place where the fire doesn't match vanilla's pixel style.
+- Volcano: lava that is still molten when the server stops won't cool later, because disasters aren't saved.
+  Fires started by lava or bombs spread by the vanilla fire rules (`doFireTick`). Lava bombs are rendered as a
+  glowing magma block (vanilla item renderer), not a custom model.
+- Volcano: shader packs (Iris) may not apply their lighting to the voxel clouds (custom pipeline with vanilla fog).
+- Volcano: the intensity-5 mountain is ~2.5 million blocks; it grows over the eruption with a ~2.2 ms/tick budget (server
+  cost at intensity 5 measured ~3.8 ms/tick in a dev client). Columns in unloaded chunks are skipped, so a part of a giant
+  volcano far from any player can stay unfinished. If the eruption ends before the builder catches up, the mountain
+  stays slightly smaller.
+- Volcano: the mountain is not reverted afterwards (damage persists by design). Pyroclastic flows and ash fall reach far
+  (hundreds of blocks at intensity 5).

@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:block/snow_height6",
+  "textures": {
+    "particle": "realisticdisasters:block/volcanic_ash",
+    "texture": "realisticdisasters:block/volcanic_ash"
+  }
+}

@@ -1,6 +1,14 @@
 package com.realisticdisasters.registry;
 
 import com.realisticdisasters.RealisticDisasters;
+import com.realisticdisasters.disaster.volcano.AshLayerBlock;
+import com.realisticdisasters.disaster.volcano.LavaBombEntity;
+import net.minecraft.world.level.block.SnowLayerBlock;
+import net.minecraft.world.level.block.SoundType;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.material.MapColor;
+import net.minecraft.world.level.material.PushReaction;
+import net.neoforged.neoforge.registries.DeferredBlock;
 import net.minecraft.core.particles.ParticleType;
 import net.minecraft.core.particles.SimpleParticleType;
 import net.minecraft.core.registries.Registries;
@@ -19,6 +27,8 @@ import net.minecraft.world.level.material.MapColor;
 import net.minecraft.world.level.material.PushReaction;
 import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredItem;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.MobCategory;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
@@ -50,6 +60,10 @@ public final class ModRegistries {
     public static final DeferredHolder<SoundEvent, SoundEvent> WILDFIRE_POP = sound("disaster.wildfire.pop");
     public static final DeferredHolder<SoundEvent, SoundEvent> WILDFIRE_WHOOSH = sound("disaster.wildfire.whoosh");
     public static final DeferredHolder<SoundEvent, SoundEvent> WILDFIRE_WHIRL = sound("disaster.wildfire.whirl");
+    public static final DeferredHolder<SoundEvent, SoundEvent> VOLCANO_RUMBLE = sound("disaster.volcano.rumble");
+    public static final DeferredHolder<SoundEvent, SoundEvent> VOLCANO_DISTANT = sound("disaster.volcano.distant");
+    public static final DeferredHolder<SoundEvent, SoundEvent> VOLCANO_BLAST = sound("disaster.volcano.blast");
+    public static final DeferredHolder<SoundEvent, SoundEvent> LAVA_BOMB_IMPACT = sound("disaster.volcano.bomb_impact");
 
     // Particles
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FUNNEL_CLOUD =
@@ -114,6 +128,29 @@ public final class ModRegistries {
                     .isViewBlocking((st, l, pos) -> false).isRedstoneConductor((st, l, pos) -> false)
                     .pushReaction(PushReaction.DESTROY));
     public static final DeferredItem<BlockItem> SCORCHED_LEAVES_ITEM = ITEMS.registerSimpleBlockItem(SCORCHED_LEAVES);
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> ASH_CLOUD =
+            PARTICLES.register("ash_cloud", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> ASH_FALL =
+            PARTICLES.register("ash_fall", () -> new SimpleParticleType(false));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> ASH_TRAIL =
+            PARTICLES.register("ash_trail", () -> new SimpleParticleType(false));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> ASH_CURTAIN =
+            PARTICLES.register("ash_curtain", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> LAVA_SPARK =
+            PARTICLES.register("lava_spark", () -> new SimpleParticleType(false));
+
+    // Blocks
+    // (shares the BLOCKS register declared above)
+    public static final DeferredBlock<AshLayerBlock> VOLCANIC_ASH = BLOCKS.registerBlock("volcanic_ash", AshLayerBlock::new,
+            () -> BlockBehaviour.Properties.of().mapColor(MapColor.COLOR_GRAY).replaceable().forceSolidOff()
+                    .strength(0.2f).sound(SoundType.SAND).pushReaction(PushReaction.DESTROY)
+                    .isViewBlocking((st, l, p) -> st.getValue(SnowLayerBlock.LAYERS) >= 8));
+
+    // Entities
+    public static final DeferredRegister.Entities ENTITY_TYPES = DeferredRegister.createEntities(RealisticDisasters.MODID);
+    public static final DeferredHolder<EntityType<?>, EntityType<LavaBombEntity>> LAVA_BOMB =
+            ENTITY_TYPES.registerEntityType("lava_bomb", LavaBombEntity::new, MobCategory.MISC,
+                    b -> b.sized(0.6f, 0.6f).clientTrackingRange(10).updateInterval(2).fireImmune().noSave().noLootTable());
 
     // Data-driven damage type (data/realisticdisasters/damage_type/tornado.json)
     public static final ResourceKey<DamageType> TORNADO_DAMAGE =
@@ -122,6 +159,8 @@ public final class ModRegistries {
             ResourceKey.create(Registries.DAMAGE_TYPE, id("earthquake"));
     public static final ResourceKey<DamageType> WILDFIRE_DAMAGE =
             ResourceKey.create(Registries.DAMAGE_TYPE, id("wildfire"));
+    public static final ResourceKey<DamageType> VOLCANO_DAMAGE =
+            ResourceKey.create(Registries.DAMAGE_TYPE, id("volcano"));
 
     private static DeferredHolder<SoundEvent, SoundEvent> sound(String name) {
         return SOUNDS.register(name, () -> SoundEvent.createVariableRangeEvent(id(name)));
@@ -136,6 +175,7 @@ public final class ModRegistries {
         PARTICLES.register(modBus);
         BLOCKS.register(modBus);
         ITEMS.register(modBus);
+        ENTITY_TYPES.register(modBus);
     }
 
     private ModRegistries() {}

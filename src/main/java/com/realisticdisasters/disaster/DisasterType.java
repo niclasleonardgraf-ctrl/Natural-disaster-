@@ -12,6 +12,7 @@ import com.realisticdisasters.disaster.earthquake.EarthquakeDisaster;
 import com.realisticdisasters.disaster.wildfire.WildfireDisaster;
 import net.minecraft.core.Holder;
 import net.minecraft.world.level.biome.Biome;
+import com.realisticdisasters.disaster.volcano.VolcanoDisaster;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
 
@@ -24,7 +25,9 @@ public enum DisasterType {
     EARTHQUAKE(EarthquakeDisaster::new, DisasterConfig.EARTHQUAKE_ENABLED::getAsBoolean,
             DisasterConfig.EARTHQUAKE_WEIGHT::getAsInt, DisasterConfig.EARTHQUAKE_BIOMES::get),
     WILDFIRE(WildfireDisaster::new, DisasterConfig.WILDFIRE_ENABLED::getAsBoolean,
-            DisasterConfig.WILDFIRE_WEIGHT::getAsInt, DisasterConfig.WILDFIRE_BIOMES::get, WildfireDisaster::biomeWeight);
+            DisasterConfig.WILDFIRE_WEIGHT::getAsInt, DisasterConfig.WILDFIRE_BIOMES::get, WildfireDisaster::biomeWeight),
+    VOLCANO(VolcanoDisaster::new, DisasterConfig.VOLCANO_ENABLED::getAsBoolean,
+            DisasterConfig.VOLCANO_WEIGHT::getAsInt, DisasterConfig.VOLCANO_BIOMES::get);
 
     public interface Factory {
         Disaster create(ServerLevel level, int id, Vec3 pos, int intensity);

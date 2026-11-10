@@ -30,6 +30,10 @@ public abstract class QuadParticleGroupMixin {
             float r = fire.cullRadius();
             if (r > 0f) return frustum.isVisible(new AABB(x - r, y - r, z - r, x + r, y + r, z + r));
         }
+        if (particle instanceof com.realisticdisasters.client.volcano.AshParticle ash) {
+            float r = ash.cullRadius();
+            if (r > 0f) return frustum.isVisible(new AABB(x - r, y - r, z - r, x + r, y + r, z + r));
+        }
         return original.call(frustum, x, y, z);
     }
 }
