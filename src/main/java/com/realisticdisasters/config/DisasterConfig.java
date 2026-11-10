@@ -82,6 +82,20 @@ public final class DisasterConfig {
     public static final ModConfigSpec.DoubleValue TSUNAMI_DURATION_SCALE;
     public static final ModConfigSpec.IntValue TSUNAMI_MAX_WATER_BLOCKS;
     public static final ModConfigSpec.ConfigValue<List<? extends String>> TSUNAMI_BIOMES;
+    // ---- blizzard ----
+    public static final ModConfigSpec.BooleanValue BLIZZARD_ENABLED;
+    public static final ModConfigSpec.IntValue BLIZZARD_WEIGHT;
+    public static final ModConfigSpec.DoubleValue BLIZZARD_DURATION_SCALE;
+    public static final ModConfigSpec.DoubleValue BLIZZARD_SNOW_RATE;
+    public static final ModConfigSpec.BooleanValue BLIZZARD_CHANGES_WEATHER;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> BLIZZARD_BIOMES;
+
+    // ---- sandstorm ----
+    public static final ModConfigSpec.BooleanValue SANDSTORM_ENABLED;
+    public static final ModConfigSpec.IntValue SANDSTORM_WEIGHT;
+    public static final ModConfigSpec.DoubleValue SANDSTORM_DURATION_SCALE;
+    public static final ModConfigSpec.DoubleValue SANDSTORM_SAND_RATE;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> SANDSTORM_BIOMES;
 
     static {
         B.push("general");
@@ -237,6 +251,36 @@ public final class DisasterConfig {
                         "minecraft:beach", "minecraft:snowy_beach", "minecraft:stony_shore", "minecraft:mangrove_swamp",
                         "minecraft:ocean", "minecraft:warm_ocean", "minecraft:lukewarm_ocean", "minecraft:cold_ocean"),
                         () -> "minecraft:beach", o -> o instanceof String);
+        B.push("blizzard");
+        BLIZZARD_ENABLED = B.define("enabled", true);
+        BLIZZARD_WEIGHT = B.comment("Relative weight when picking a natural disaster.")
+                .defineInRange("weight", 10, 0, 1000);
+        BLIZZARD_DURATION_SCALE = B.comment("Multiplier for how long a blizzard's peak lasts.")
+                .defineInRange("durationScale", 1.0, 0.1, 10.0);
+        BLIZZARD_SNOW_RATE = B.comment("Multiplier for how fast snow layers pile up (0 = no snow accumulation).")
+                .defineInRange("snowRate", 1.0, 0.0, 10.0);
+        BLIZZARD_CHANGES_WEATHER = B.comment("Start precipitation (snow in cold biomes) while a blizzard is active.")
+                .define("changesWeather", true);
+        BLIZZARD_BIOMES = B.comment("Biomes (ids or #tags) where blizzards can form naturally.")
+                .defineListAllowEmpty("biomes", List.of(
+                        "minecraft:snowy_plains", "minecraft:ice_spikes", "minecraft:snowy_taiga", "minecraft:snowy_slopes",
+                        "minecraft:grove", "minecraft:frozen_peaks", "minecraft:jagged_peaks", "minecraft:snowy_beach",
+                        "minecraft:frozen_river"),
+                        () -> "minecraft:snowy_plains", o -> o instanceof String);
+        B.pop();
+
+        B.push("sandstorm");
+        SANDSTORM_ENABLED = B.define("enabled", true);
+        SANDSTORM_WEIGHT = B.comment("Relative weight when picking a natural disaster.")
+                .defineInRange("weight", 10, 0, 1000);
+        SANDSTORM_DURATION_SCALE = B.comment("Multiplier for how long a sandstorm's peak lasts.")
+                .defineInRange("durationScale", 1.0, 0.1, 10.0);
+        SANDSTORM_SAND_RATE = B.comment("Multiplier for how fast sand layers and piles build up (0 = no sand accumulation).")
+                .defineInRange("sandRate", 1.0, 0.0, 10.0);
+        SANDSTORM_BIOMES = B.comment("Biomes (ids or #tags) where sandstorms can form naturally. Badlands storms carry red sand.")
+                .defineListAllowEmpty("biomes", List.of(
+                        "minecraft:desert", "minecraft:badlands", "minecraft:wooded_badlands", "minecraft:eroded_badlands"),
+                        () -> "minecraft:desert", o -> o instanceof String);
         B.pop();
     }
 

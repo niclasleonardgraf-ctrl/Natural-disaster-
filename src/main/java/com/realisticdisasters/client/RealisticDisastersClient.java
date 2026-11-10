@@ -15,6 +15,7 @@ import net.minecraft.client.renderer.entity.ThrownItemRenderer;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import com.realisticdisasters.client.meteor.MeteorParticle;
 import com.realisticdisasters.client.tsunami.WaveParticle;
+import com.realisticdisasters.client.particle.WindParticle;
 import com.realisticdisasters.network.DisasterRemovePayload;
 import com.realisticdisasters.network.DisasterSyncPayload;
 import com.realisticdisasters.registry.ModRegistries;
@@ -79,6 +80,10 @@ public class RealisticDisastersClient {
         event.registerSpriteSet(ModRegistries.WAVE_FOAM.get(), s -> WaveParticle.provider(WaveParticle.Kind.FOAM, s));
         event.registerSpriteSet(ModRegistries.SEA_SPRAY.get(), s -> WaveParticle.provider(WaveParticle.Kind.MIST, s));
         event.registerSpriteSet(ModRegistries.FLOOD_DEBRIS.get(), s -> WaveParticle.provider(WaveParticle.Kind.DEBRIS, s));
+        event.registerSpriteSet(ModRegistries.BLIZZARD_SNOW.get(), s -> WindParticle.provider(WindParticle.Kind.FLAKE, s));
+        event.registerSpriteSet(ModRegistries.SNOW_HAZE.get(), s -> WindParticle.provider(WindParticle.Kind.SNOW_HAZE, s));
+        event.registerSpriteSet(ModRegistries.SAND_GRAIN.get(), s -> WindParticle.provider(WindParticle.Kind.GRAIN, s));
+        event.registerSpriteSet(ModRegistries.SAND_HAZE.get(), s -> WindParticle.provider(WindParticle.Kind.SAND_HAZE, s));
     }
 
     private static void registerEntityRenderers(EntityRenderersEvent.RegisterRenderers event) {

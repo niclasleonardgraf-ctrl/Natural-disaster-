@@ -1,12 +1,20 @@
-#!/usr/bin/env python3
 """Writes the GameTest arena structure (gzip NBT) used by the automated disaster tests.
 Usage: python3 tools/gen_structures.py
 """
+
+
 import gzip
+
+
 import os
+
+
 import struct
 
+
 DATA_VERSION = 4790  # Minecraft 26.1.2
+
+
 OUT = os.path.join(os.path.dirname(__file__), "..", "src", "main", "resources", "data", "realisticdisasters", "structure")
 
 
@@ -29,15 +37,6 @@ def payload(tag_type, value):
             out += struct.pack(">b", t) + tag_string(name) + payload(t, v)
         return out + b"\x00"
     raise ValueError(tag_type)
-
-
-def palette_entry(state):
-    """"minecraft:oak_leaves[persistent=true]" -> {Name, Properties}."""
-    if "[" not in state:
-        return {"Name": (8, state)}
-    name, props = state[:-1].split("[", 1)
-    values = dict(kv.split("=") for kv in props.split(","))
-    return {"Name": (8, name), "Properties": (10, {k: (8, v) for k, v in values.items()})}
 
 
 def write_structure(name, size, blocks):
@@ -134,13 +133,20 @@ def earthquake_arena():
             for z in range(sz):
                 blocks.setdefault((x, y, z), "minecraft:air")
     write_structure("earthquake_arena", (sx, sy, sz), blocks)
+
+
+def palette_entry(state):
+    """"minecraft:oak_leaves[persistent=true]" -> {Name, Properties}."""
+    if "[" not in state:
+        return {"Name": (8, state)}
+    name, props = state[:-1].split("[", 1)
+    values = dict(kv.split("=") for kv in props.split(","))
+    return {"Name": (8, name), "Properties": (10, {k: (8, v) for k, v in values.items()})}
+
+
 def wildfire_arena(name="wildfire_arena", sx=32, sz=32, trees=((8, 8), (24, 10), (11, 24))):
     """Grass with brush patches and oak trees: fuel of every kind for the wildfire tests."""
     sy = 12
-def tsunami_arena():
-    """A walled strip of sea (x 0-15, surface y4), a sand beach (x 16-19) and flat grassland with plants and a small
-    pre-existing pond (a water source at 24,5,24 inside a cobblestone ring) that the flood must leave alone."""
-    sx, sy, sz = 56, 12, 48
     blocks = {}
     for x in range(sx):
         for z in range(sz):
@@ -171,6 +177,8 @@ def tsunami_arena():
             for z in range(sz):
                 blocks.setdefault((x, y, z), "minecraft:air")
     write_structure(name, (sx, sy, sz), blocks)
+
+
 def meteor_arena():
     """Deeper than the tornado arena so a crater (and its core) fits inside the structure."""
     sx, sy, sz = 32, 18, 32
@@ -185,6 +193,16 @@ def meteor_arena():
             for y in range(12, sy):
                 blocks[(x, y, z)] = "minecraft:air"
     write_structure("meteor_arena", (sx, sy, sz), blocks)
+
+
+def tsunami_arena():
+    """A walled strip of sea (x 0-15, surface y4), a sand beach (x 16-19) and flat grassland with plants and a small
+    pre-existing pond (a water source at 24,5,24 inside a cobblestone ring) that the flood must leave alone."""
+    sx, sy, sz = 56, 12, 48
+    blocks = {}
+    for x in range(sx):
+        for z in range(sz):
+            blocks[(x, 0, z)] = "minecraft:stone"
             if x < 16:
                 wall = x == 0 or z == 0 or z == sz - 1
                 for y in range(1, 5):
@@ -216,11 +234,40 @@ def meteor_arena():
     write_structure("tsunami_arena", (sx, sy, sz), blocks)
 
 
-if __name__ == "__main__":
+def _main_1():
+    arena()
+
+
+def _main_2():
     arena()
     earthquake_arena()
+
+
+def _main_3():
+    arena()
     wildfire_arena()
     # bigger field for the wildfire performance test, so an intensity-3 fire has room to build a real front
     wildfire_arena("wildfire_field", 48, 48, [(x, z) for x in range(8, 46, 13) for z in range(9, 46, 14)])
+
+
+def _main_4():
+    arena()
     meteor_arena()
+
+
+def _main_5():
+    arena()
     tsunami_arena()
+
+
+def main():
+    # each merged branch's original entry point (deterministic, so shared steps can repeat safely)
+    _main_1()
+    _main_2()
+    _main_3()
+    _main_4()
+    _main_5()
+
+
+if __name__ == "__main__":
+    main()

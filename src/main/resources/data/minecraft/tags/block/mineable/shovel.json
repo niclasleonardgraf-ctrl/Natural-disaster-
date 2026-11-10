@@ -2,6 +2,8 @@
   "replace": false,
   "values": [
     "realisticdisasters:scorched_earth",
-    "realisticdisasters:volcanic_ash"
+    "realisticdisasters:volcanic_ash",
+    "realisticdisasters:sand_layer",
+    "realisticdisasters:red_sand_layer"
   ]
 }

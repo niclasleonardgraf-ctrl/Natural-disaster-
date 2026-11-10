@@ -93,5 +93,21 @@
   "subtitles.realisticdisasters.tsunami.roar": "Tsunami roars",
   "subtitles.realisticdisasters.tsunami.surf": "Heavy surf",
   "subtitles.realisticdisasters.tsunami.crash": "Wave crashes",
-  "realisticdisasters.configuration.tsunami": "Tsunami / flood"
+  "realisticdisasters.configuration.tsunami": "Tsunami / flood",
+  "disaster.realisticdisasters.blizzard": "Blizzard",
+  "disaster.realisticdisasters.blizzard.warning": "The wind picks up and the horizon turns white... a blizzard is coming.",
+  "disaster.realisticdisasters.blizzard.onset": "White-out! Get indoors or wear leather before the cold sets in!",
+  "disaster.realisticdisasters.sandstorm": "Sandstorm",
+  "disaster.realisticdisasters.sandstorm.warning": "A brown wall is rising on the horizon... a sandstorm is coming.",
+  "disaster.realisticdisasters.sandstorm.onset": "The sandstorm is here! Find shelter and cover your head!",
+  "death.attack.realisticdisasters.sandstorm": "%1$s was scoured by a sandstorm",
+  "death.attack.realisticdisasters.sandstorm.player": "%1$s was scoured by a sandstorm while fighting %2$s",
+  "block.realisticdisasters.sand_layer": "Sand Layer",
+  "block.realisticdisasters.red_sand_layer": "Red Sand Layer",
+  "subtitles.realisticdisasters.blizzard.howl": "Blizzard howls",
+  "subtitles.realisticdisasters.blizzard.distant": "Distant moaning wind",
+  "subtitles.realisticdisasters.sandstorm.howl": "Sandstorm hisses",
+  "subtitles.realisticdisasters.sandstorm.distant": "Distant roaring wind",
+  "realisticdisasters.configuration.blizzard": "Blizzard",
+  "realisticdisasters.configuration.sandstorm": "Sandstorm"
 }
