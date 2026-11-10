@@ -59,6 +59,7 @@ public final class DisasterManager {
         int capped = Mth.clamp(intensity, 1, DisasterConfig.MAX_INTENSITY.getAsInt());
         Disaster d = type.create(level, nextId++, pos, capped);
         state(level).active.add(d);
+        com.realisticdisasters.control.Announcements.started(level, d);
         RealisticDisasters.LOGGER.info("Started {} #{} (intensity {}) at {} in {}", type.id(), d.id(), capped,
                 BlockPos.containing(pos).toShortString(), level.dimension().identifier());
         return d;
@@ -131,6 +132,7 @@ public final class DisasterManager {
             }
             if (d.isFinished()) {
                 it.remove();
+                com.realisticdisasters.control.Announcements.ended(level, d);
                 sendToNearby(level, d.pos(), d.effectRadius(), new DisasterRemovePayload(d.id()));
             } else if (sync) {
                 sendToNearby(level, d.pos(), d.effectRadius(), d.toPayload());
@@ -292,6 +294,7 @@ public final class DisasterManager {
     public static void onServerStopped(ServerStoppedEvent event) {
         LEVELS.clear();
         nextId = 1;
+        com.realisticdisasters.control.DisasterControl.clear();
         autostarted = false;
         devStage = 0;
     }

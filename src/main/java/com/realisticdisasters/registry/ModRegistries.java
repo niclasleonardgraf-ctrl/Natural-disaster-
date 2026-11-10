@@ -48,6 +48,13 @@ public final class ModRegistries {
     public static final DeferredRegister<ParticleType<?>> PARTICLES = DeferredRegister.create(Registries.PARTICLE_TYPE, RealisticDisasters.MODID);
     public static final DeferredRegister.Blocks BLOCKS = DeferredRegister.createBlocks(RealisticDisasters.MODID);
     public static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(RealisticDisasters.MODID);
+    public static final DeferredRegister<net.minecraft.world.item.CreativeModeTab> TABS =
+            DeferredRegister.create(Registries.CREATIVE_MODE_TAB, RealisticDisasters.MODID);
+
+    public static final DeferredItem<com.realisticdisasters.item.DisasterControllerItem> DISASTER_CONTROLLER =
+            ITEMS.registerItem("disaster_controller", com.realisticdisasters.item.DisasterControllerItem::new,
+                    p -> p.stacksTo(1).rarity(net.minecraft.world.item.Rarity.EPIC));
+
 
     // Sounds (all original, synthesized by tools/gen_sounds.py)
     public static final DeferredHolder<SoundEvent, SoundEvent> TORNADO_ROAR = sound("disaster.tornado.roar");
@@ -235,11 +242,19 @@ public final class ModRegistries {
         return Identifier.fromNamespaceAndPath(RealisticDisasters.MODID, path);
     }
 
+    public static final net.neoforged.neoforge.registries.DeferredHolder<net.minecraft.world.item.CreativeModeTab, net.minecraft.world.item.CreativeModeTab> TAB =
+            TABS.register("main", () -> net.minecraft.world.item.CreativeModeTab.builder()
+                    .title(net.minecraft.network.chat.Component.translatable("itemGroup.realisticdisasters"))
+                    .icon(() -> DISASTER_CONTROLLER.get().getDefaultInstance())
+                    .displayItems((params, out) -> ITEMS.getEntries().forEach(e -> out.accept(e.get())))
+                    .build());
+
     public static void register(IEventBus modBus) {
         SOUNDS.register(modBus);
         PARTICLES.register(modBus);
         BLOCKS.register(modBus);
         ITEMS.register(modBus);
+        TABS.register(modBus);
         ENTITY_TYPES.register(modBus);
         modBus.addListener(ModRegistries::addToCreativeTabs);
     }

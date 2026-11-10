@@ -1,0 +1,6 @@
+{
+  "model": {
+    "type": "minecraft:model",
+    "model": "realisticdisasters:item/disaster_controller"
+  }
+}

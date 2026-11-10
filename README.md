@@ -5,6 +5,22 @@ Minecraft **26.1.2**, NeoForge **26.1.2.126**, Java **25**, ModDevGradle.
 
 Full design spec: [`docs/SPEC.md`](docs/SPEC.md).
 
+## Getting started (no commands needed)
+
+1. Install NeoForge 26.1.2.126+ for Minecraft 26.1.2 and put the jar in `.minecraft/mods`.
+2. Join a world. You receive a **Disaster Controller** on your first join. It's also in the *Realistic Natural
+   Disasters* creative tab, and craftable: lightning rod on top, copper–compass–copper in the middle,
+   copper–redstone–copper at the bottom.
+3. Hold it and **right-click**: pick a disaster, set the **intensity** (Weak → Catastrophic) and the **location**
+   (in front of you / somewhere nearby / right here), then press **Start**.
+4. The **Active** tab lists every disaster near you, with **Stop** (let it die down) and **Remove** (instantly).
+5. The gear button opens the **settings**: every option has a readable name and an explanation. Natural spawning,
+   frequency, intensity cap, block destruction, protected areas, camera shake, particles and more.
+
+Disasters also form naturally by biome. A big on-screen warning tells you what is coming and from which direction.
+On servers, `controllerRequiresOp = true` restricts the controller to operators. Admin commands (`/disaster ...`)
+are still available.
+
 ## Status
 
 All seven disasters are in this build (integrated from the per-disaster sessions):

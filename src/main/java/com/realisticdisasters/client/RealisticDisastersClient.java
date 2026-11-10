@@ -33,6 +33,8 @@ import net.neoforged.neoforge.client.network.event.RegisterClientPayloadHandlers
 public class RealisticDisastersClient {
     public RealisticDisastersClient(IEventBus modBus, ModContainer container) {
         container.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new);
+        com.realisticdisasters.item.DisasterControllerItem.openScreen = () -> net.minecraft.client.Minecraft.getInstance()
+                .setScreen(new com.realisticdisasters.client.gui.DisasterControllerScreen());
         modBus.addListener(RealisticDisastersClient::registerPayloadHandlers);
         modBus.addListener(RealisticDisastersClient::registerParticles);
         modBus.addListener(RealisticDisastersClient::registerEntityRenderers);

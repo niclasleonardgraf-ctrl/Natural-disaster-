@@ -17,6 +17,10 @@ public final class DisasterConfig {
     public static final ModConfigSpec.IntValue MAX_INTENSITY;
     public static final ModConfigSpec.IntValue MAX_ACTIVE;
     public static final ModConfigSpec.IntValue SYNC_RANGE;
+    public static final ModConfigSpec.BooleanValue ANNOUNCEMENTS;
+    public static final ModConfigSpec.BooleanValue DEVICE_REQUIRES_OP;
+    public static final ModConfigSpec.IntValue DEVICE_COOLDOWN;
+    public static final ModConfigSpec.BooleanValue GIVE_CONTROLLER;
 
     // ---- destruction / protection ----
     public static final ModConfigSpec.BooleanValue BLOCK_DESTRUCTION;
@@ -111,6 +115,14 @@ public final class DisasterConfig {
                 .defineInRange("maxActive", 3, 1, 32);
         SYNC_RANGE = B.comment("Players within this many blocks of a disaster receive its effects.")
                 .defineInRange("syncRange", 512, 64, 4096);
+        ANNOUNCEMENTS = B.comment("Show a big on-screen warning when a disaster forms, and a notice when it has passed.")
+                .define("announcements", true);
+        DEVICE_REQUIRES_OP = B.comment("Only operators may start or stop disasters with the Disaster Controller (recommended on public servers).")
+                .define("controllerRequiresOp", false);
+        DEVICE_COOLDOWN = B.comment("Seconds a player must wait between starting disasters with the Disaster Controller.")
+                .defineInRange("controllerCooldown", 3, 0, 3600);
+        GIVE_CONTROLLER = B.comment("Give every player a Disaster Controller (with a short welcome message) the first time they join.")
+                .define("giveControllerOnFirstJoin", true);
         B.pop();
 
         B.push("destruction");

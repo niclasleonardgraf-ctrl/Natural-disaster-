@@ -90,6 +90,7 @@ public final class DisasterGameTests {
         FUNCTIONS.register("volcano_intensity3_tick_cost", () -> DisasterGameTests::volcanoTickCost);
         FUNCTIONS.register("volcano_pyroclastic_flow", () -> DisasterGameTests::volcanoPyroclasticFlow);
         FUNCTIONS.register("volcano_mountain_scales", () -> DisasterGameTests::volcanoMountainScales);
+        FUNCTIONS.register("controller_start_and_stop", () -> DisasterGameTests::controllerStartAndStop);
         modBus.addListener(DisasterGameTests::registerTests);
         FUNCTIONS.register("wildfire_heats_the_world", () -> DisasterGameTests::wildfireHeatsTheWorld);
         FUNCTIONS.register("wildfire_whirl_lofts_objects", () -> DisasterGameTests::wildfireWhirlLoftsObjects);
@@ -141,6 +142,7 @@ public final class DisasterGameTests {
         add(event, "sandstorm_builds_piles", event.registerEnvironment(ModRegistries.id("env_sandstorm_piles")), 100);
         add(event, "windstorm_lee_shelters", event.registerEnvironment(ModRegistries.id("env_windstorm_lee")), 400);
         add(event, "windstorm_weathers_fires_and_crops", event.registerEnvironment(ModRegistries.id("env_windstorm_weather")), 100);
+        add(event, "controller_start_and_stop", event.registerEnvironment(ModRegistries.id("env_controller")), 100);
     }
 
     private static void addWildfire(RegisterGameTestsEvent event, String name, Holder<TestEnvironmentDefinition<?>> env, int maxTicks) {
@@ -1282,6 +1284,52 @@ public final class DisasterGameTests {
                     String.format("%.3f", cost), placed);
             helper.assertTrue(placed > 500, "the flood did not progress (" + placed + " blocks)");
             helper.assertTrue(cost < 2.0, "tsunami too expensive: " + cost + " ms/tick");
+            helper.succeed();
+        });
+    }
+
+    /** The Disaster Controller's server path: validation (item, cooldown), start near the player, stop all. */
+    private static void controllerStartAndStop(GameTestHelper helper) {
+        cleanSlate(helper);
+        config(DisasterConfig.SPAWN_PROTECTION_RADIUS, 0);
+        var player = helper.makeMockServerPlayerInLevel();
+        // The mock player must leave again on every path: natural spawning targets online players, so a lingering
+        // player could have a natural disaster form inside another test's arena.
+        Runnable logout = () -> helper.getLevel().getServer().getPlayerList().remove(player);
+        try {
+            controllerChecks(helper, player, logout);
+        } catch (RuntimeException e) {
+            logout.run();
+            throw e;
+        }
+    }
+
+    private static void controllerChecks(GameTestHelper helper, net.minecraft.server.level.ServerPlayer player, Runnable logout) {
+        player.snapTo(helper.absoluteVec(new Vec3(16, 4, 16)));
+        var here = com.realisticdisasters.control.DisasterControl.Placement.HERE;
+        // Joining hands out a controller (first-join gift); check the gift, then empty the hands for the refusal test.
+        helper.assertTrue(player.getInventory().contains(new net.minecraft.world.item.ItemStack(ModRegistries.DISASTER_CONTROLLER.get())),
+                "first join should give a Disaster Controller");
+        player.getInventory().clearContent();
+        var noItem = com.realisticdisasters.control.DisasterControl.start(player, DisasterType.TORNADO, 2, here, true);
+        if (noItem.disaster() != null) DisasterManager.stop(helper.getLevel(), noItem.disaster().id(), false);
+        helper.assertTrue(!noItem.success(), "start without holding the controller must be refused");
+
+        player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, new net.minecraft.world.item.ItemStack(ModRegistries.DISASTER_CONTROLLER.get()));
+        var ok = com.realisticdisasters.control.DisasterControl.start(player, DisasterType.TORNADO, 2, here, true);
+        helper.assertTrue(ok.success() && ok.disaster() != null, "start failed: " + ok.message().getString());
+        helper.assertTrue(ok.disaster().pos().distanceTo(player.position()) < 3, "'Right here' should start at the player");
+        helper.assertTrue(DisasterManager.active(helper.getLevel()).contains(ok.disaster()), "disaster not active");
+
+        var again = com.realisticdisasters.control.DisasterControl.start(player, DisasterType.EARTHQUAKE, 2, here, true);
+        helper.assertTrue(!again.success(), "cooldown should block an immediate second start");
+
+        var stop = com.realisticdisasters.control.DisasterControl.stop(player, -1, true, true);
+        helper.assertTrue(stop.success(), "stop all failed: " + stop.message().getString());
+        helper.runAfterDelay(2, () -> {
+            helper.assertTrue(!DisasterManager.active(helper.getLevel()).contains(ok.disaster()), "disaster still active after stop");
+            com.realisticdisasters.control.DisasterControl.clear();
+            logout.run();
             helper.succeed();
         });
     }
