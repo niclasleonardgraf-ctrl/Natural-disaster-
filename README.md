@@ -71,7 +71,7 @@ large particles by their real size (vanilla culls by centre point). All quad par
 - `tornado_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.23 ms)
 - `blizzard_buries_and_pushes` / `sandstorm_buries_and_pushes`: an armour stand gets pushed downwind and snow / sand layers pile up
 - `blizzard_respects_block_toggle` / `sandstorm_respects_block_toggle`: with `blockDestruction=false` no blocks change
-- `blizzard_intensity3_tick_cost` / `sandstorm_intensity3_tick_cost`: below 2 ms/tick (measured ~0.9 / ~0.7 ms before halving the entity scan)
+- `blizzard_intensity3_tick_cost` / `sandstorm_intensity3_tick_cost`: below 2 ms/tick (measured 0.35–0.9 ms across runs)
 - `sandstorm_builds_piles`: sand drifting against a wall settles into a full sand block, open ground only gets a thin layer
 
 ## Configuration
@@ -150,4 +150,7 @@ and `tools/gen_block_assets.py` (sand layer blockstates, models, loot tables).
 - Fine snowflakes are white on white fog, so they mostly read as motion close to the camera. The haze puffs carry
   most of the white-out.
 - Shelter-seeking is a short random search, not a real pathfinding query. In open terrain animals just drift downwind.
+- In the test world (plains) vanilla rain still falls inside a blizzard or sandstorm, because the weather is global.
+  In the storms' own biomes it falls as snow (blizzard) or not at all (desert/badlands).
+- Screenshots of the headless visual check: `docs/screenshots/blizzard.png`, `docs/screenshots/sandstorm.png`.
 - The GameTest arena structure logs a harmless `oak_leaves[persistent=true]` parse error (existing, from `gen_structures.py`).

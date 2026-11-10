@@ -141,12 +141,13 @@ public abstract class WindStormDisaster extends Disaster {
         double nx = pos.x + Math.cos(heading) * driftSpeed;
         double nz = pos.z + Math.sin(heading) * driftSpeed;
         BlockPos column = BlockPos.containing(nx, pos.y, nz);
-        if (!level.isLoaded(column)) {
-            beginAftermath();
-            return;
-        }
+        // A storm is wide: if its centre is over unloaded terrain it just holds still (it still covers loaded
+        // ground around it) and dies down when its time is up, instead of ending abruptly.
+        if (!level.isLoaded(column)) return;
         double ground = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, column.getX(), column.getZ());
-        pos = new Vec3(nx, pos.y + (ground - pos.y) * 0.02, nz);
+        double dy = ground - pos.y;
+        // Snap when the start height was a guess (e.g. started over a chunk that wasn't loaded yet).
+        pos = new Vec3(nx, Math.abs(dy) > 16 ? ground : pos.y + dy * 0.02, nz);
     }
 
     /** True if nothing solid is above this point (open sky = exposed to the storm). */

@@ -57,7 +57,8 @@ public class BlizzardDisaster extends WindStormDisaster {
         if (force < 0.5f || !entity.canFreeze()) return;
         // Vanilla thaws 2 ticks of frost per tick outside powder snow; this is called every 10 ticks, so anything
         // above 20 accumulates. Fully frozen entities take vanilla freeze damage.
-        int add = Math.round((20 + 1.5f * intensity) * force); // intensity 4: fully frozen after ~25 s outside
+        // Net gain per call ≈ 1.2 × intensity: fully frozen after ~35 s outside at intensity 3, ~12 s at intensity 5.
+        int add = 20 + Math.round(intensity * force * 1.2f);
         entity.setTicksFrozen(Math.min(entity.getTicksRequiredToFreeze() + 20, entity.getTicksFrozen() + add));
     }
 }
