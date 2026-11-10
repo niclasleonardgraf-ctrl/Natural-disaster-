@@ -31,6 +31,12 @@ public final class ModRegistries {
             PARTICLES.register("wall_cloud", () -> new SimpleParticleType(true));
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> DUST_INFLOW =
             PARTICLES.register("dust_inflow", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FUNNEL_SURFACE =
+            PARTICLES.register("funnel_surface", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> CLOUD_SHEET =
+            PARTICLES.register("cloud_sheet", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> CLOUD_BAND =
+            PARTICLES.register("cloud_band", () -> new SimpleParticleType(true));
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> RAIN_SHAFT =
             PARTICLES.register("rain_shaft", () -> new SimpleParticleType(true));
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> DUST_CLOUD =

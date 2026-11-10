@@ -128,7 +128,7 @@ public final class EffectsManager {
         float targetFar = Math.min(far, fogEnd);
         float newFar = Mth.lerp(Mth.clamp(fogAmount, 0, 1), far, targetFar);
         event.setFarPlaneDistance(newFar);
-        event.setNearPlaneDistance(Math.min(event.getNearPlaneDistance(), newFar * 0.15f));
+        event.setNearPlaneDistance(Math.min(event.getNearPlaneDistance(), newFar * 0.4f));
     }
 
     @SubscribeEvent
