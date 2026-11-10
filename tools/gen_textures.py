@@ -78,7 +78,8 @@ def debris_texture(seed, size=8):
 
 # Meteor textures are deliberately NOT hard pixel art: light and smoke are soft in reality, so these are smooth
 # alpha gradients (white, tinted per particle in code). Smoke keeps a faint 2x2-texel grain so it sits next to
-# vanilla blocks without looking like a photo.
+# vanilla blocks without looking like a photo. (Smoke was first tried with a 2x2-texel grain; at 10+ block puff
+# sizes the grain showed up as blocky silhouettes, so smoke is smooth too.)
 
 
 def soft_glow(size, sigma, core=0.0):
@@ -129,26 +130,24 @@ def value_noise(size, cells, rng):
 
 
 def smoke_texture(seed, size=32):
-    """Soft billowy puff: a few overlapping lobes, low-frequency noise, light from above, 2x2 texel grain."""
+    """Soft billowy puff: a few overlapping lobes, low-frequency noise, light from above."""
     rng = random.Random(seed)
     lobes = [(rng.uniform(0.38, 0.62) * size, rng.uniform(0.4, 0.62) * size, rng.uniform(0.2, 0.3) * size) for _ in range(4)]
     n1 = value_noise(size, 4, rng)
     n2 = value_noise(size, 8, rng)
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    for y in range(0, size, 2):
-        for x in range(0, size, 2):
+    for y in range(size):
+        for x in range(size):
             dens = 0.0
             for cx, cy, r in lobes:
-                d = math.hypot(x + 1 - cx, y + 1 - cy) / r
+                d = math.hypot(x + 0.5 - cx, y + 0.5 - cy) / r
                 dens = max(dens, 1 - d * d)
             if dens <= 0:
                 continue
             dens = dens * (0.6 + 0.4 * n1[y][x]) * (0.85 + 0.3 * n2[y][x])
-            a = max(0.0, min(1.0, dens ** 1.4 * 1.5))
+            a = max(0.0, min(1.0, dens ** 1.6 * 1.4))
             shade = int(255 * (0.82 + 0.18 * (1 - y / size)) * (0.9 + 0.1 * n2[y][x]))
-            for oy in range(2):
-                for ox in range(2):
-                    img.putpixel((x + ox, y + oy), (shade, shade, shade, int(a * 235)))
+            img.putpixel((x, y), (shade, shade, shade, int(a * 235)))
     return img
 
 

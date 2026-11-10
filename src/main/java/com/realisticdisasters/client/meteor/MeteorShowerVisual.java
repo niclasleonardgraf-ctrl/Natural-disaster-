@@ -294,7 +294,7 @@ public final class MeteorShowerVisual implements DisasterVisual {
         double a = RANDOM.nextDouble() * Math.PI * 2;
         double r = 30 + RANDOM.nextDouble() * 90;
         double h = 50 + RANDOM.nextDouble() * 70;
-        Vec3 mid = new Vec3(cam.x + Math.cos(a) * r, Math.max(cam.y, 63) + h, cam.z + Math.sin(a) * r);
+        Vec3 mid = new Vec3(cam.x + Math.cos(a) * r, cam.y + h, cam.z + Math.sin(a) * r);
         Vec3 start = mid.subtract(vel.scale(life * 0.5));
         float magnitude = bright ? 1.8f + RANDOM.nextFloat() * 0.6f : 0.7f + RANDOM.nextFloat() * RANDOM.nextFloat() * 1.2f;
         float c = RANDOM.nextFloat();
@@ -337,15 +337,17 @@ public final class MeteorShowerVisual implements DisasterVisual {
             if (!visible) continue;
             float lod = far < 128 ? 1f : far < 256 ? 0.6f : 0.3f;
             // Readable size at any distance, but never a giant sprite up close.
-            float core = (0.9f + m.size * 1.4f) * (float) Math.max(1.0, far / 90.0);
+            float core = (1.3f + m.size * 2f) * (float) Math.max(1.0, far / 90.0);
+            // Blinding white head inside a large coloured halo (the halo lights the smoke around it).
             spawn(ModRegistries.METEOR_FIREBALL.get(), head, vel, p -> p.size(core));
-            glow(head, vel, core * 2.6f, 2, m.halo, m.halo, 0.45f, 1f);
-            // Glowing wake right behind the head.
-            int wake = Math.max(2, (int) Math.ceil(FLIGHT_SPEED / Math.max(0.3, core * 0.35)));
+            glow(head, vel, core * 2.2f, 2, new float[]{1f, 0.97f, 0.9f}, m.halo, 0.7f, 1f);
+            glow(head, vel, core * 4.5f, 2, m.halo, m.halo, 0.3f, 1f);
+            // Continuous incandescent wake: densely packed glows that cool from white to orange-red behind the head.
+            int wake = Math.max(3, (int) Math.ceil(FLIGHT_SPEED / Math.max(0.25, core * 0.22)));
             for (int i = 1; i <= wake; i++) {
                 Vec3 at = head.subtract(vel.scale(i / (double) wake));
-                glow(at, Vec3.ZERO, core * (1f - i / (float) wake * 0.4f), 5 + RANDOM.nextInt(4), new float[]{1f, 0.93f, 0.75f},
-                        m.halo, 0.8f, 0.8f);
+                glow(at, Vec3.ZERO, core * 0.9f, 7 + RANDOM.nextInt(5), new float[]{1f, 0.93f, 0.75f},
+                        new float[]{0.85f, 0.3f, 0.1f}, 0.75f, 0.6f);
             }
             // Fragments shedding off the head.
             int frags = count((1 + m.size * 2.5f) * density * lod);
@@ -358,9 +360,11 @@ public final class MeteorShowerVisual implements DisasterVisual {
             for (int i = 0; i < smoke; i++) {
                 Vec3 at = head.subtract(vel.scale(0.3 + RANDOM.nextDouble() * 1.4)).add(jitter(core * 0.25));
                 float g = 0.38f + RANDOM.nextFloat() * 0.14f;
-                float sz = core * (0.9f + RANDOM.nextFloat() * 0.5f);
-                spawn(ModRegistries.METEOR_SMOKE.get(), at, jitter(0.015), p -> p.size(sz).grow(3.2f).life(120 + RANDOM.nextInt(120))
-                        .alpha(0.5f).hot(0.06f).drag(0.98f).colors(g, g * 0.97f, g * 0.94f, g, g, g));
+                float sz = Math.min(4f, core * (0.6f + RANDOM.nextFloat() * 0.4f));
+                // Starts behind the wake (2+ ticks back) so the incandescent part stays continuous.
+                Vec3 behind = at.subtract(vel.scale(1.5));
+                spawn(ModRegistries.METEOR_SMOKE.get(), behind, jitter(0.015), p -> p.size(sz).grow(3f).life(140 + RANDOM.nextInt(120))
+                        .alpha(0.45f).drag(0.98f).colors(g * 1.05f, g, g * 0.95f, g, g, g));
             }
         }
     }
@@ -399,9 +403,9 @@ public final class MeteorShowerVisual implements DisasterVisual {
         int fire = count((14 + size * 22) * Math.max(0.4f, n));
         for (int i = 0; i < fire; i++) {
             Vec3 v = hemisphere(0.25 + RANDOM.nextDouble() * 0.45 * (0.7 + size));
-            float sz = 1.4f + size * 1.6f + RANDOM.nextFloat();
-            spawn(ModRegistries.METEOR_SMOKE.get(), p.add(jitter(0.6)), v, q -> q.size(sz).grow(2.6f).life(70 + RANDOM.nextInt(60))
-                    .alpha(0.85f).hot(0.18f).drag(0.86f).buoyancy(0.004f).colors(0.17f, 0.15f, 0.14f, 0.2f, 0.18f, 0.17f));
+            float sz = 1.2f + size * 1.2f + RANDOM.nextFloat();
+            spawn(ModRegistries.METEOR_SMOKE.get(), p.add(jitter(0.6)), v, q -> q.size(sz).grow(2.4f).life(70 + RANDOM.nextInt(60))
+                    .alpha(0.75f).hot(0.18f).drag(0.86f).buoyancy(0.004f).colors(0.24f, 0.22f, 0.2f, 0.3f, 0.28f, 0.26f));
         }
         // Glowing fragments and molten spray.
         int embers = count((20 + size * 34) * n);
@@ -470,10 +474,10 @@ public final class MeteorShowerVisual implements DisasterVisual {
                 int plume = count((1.5f + im.size * 2.5f) * density * lod * (1f - age / 40f));
                 for (int i = 0; i < plume; i++) {
                     Vec3 at = im.pos.add(jitter(0.8 + im.size));
-                    float sz = 1.6f + im.size * 1.5f;
+                    float sz = 1.4f + im.size * 1.2f;
                     float sh = 0.75f + RANDOM.nextFloat() * 0.2f;
                     spawn(ModRegistries.METEOR_SMOKE.get(), at, new Vec3(0, 0.12 + RANDOM.nextDouble() * 0.18 * (0.6 + im.size), 0),
-                            q -> q.size(sz).grow(4.5f).life(200 + RANDOM.nextInt(160)).alpha(0.55f).drag(0.965f).buoyancy(0.0015f)
+                            q -> q.size(sz).grow(3.5f).life(200 + RANDOM.nextInt(160)).alpha(0.45f).drag(0.965f).buoyancy(0.0015f)
                                     .colors(dc[0] * sh, dc[1] * sh, dc[2] * sh, dc[0] * 0.9f, dc[1] * 0.9f, dc[2] * 0.9f));
                 }
             }

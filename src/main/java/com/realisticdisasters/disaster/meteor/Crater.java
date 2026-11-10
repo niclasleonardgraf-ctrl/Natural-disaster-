@@ -110,13 +110,13 @@ final class Crater {
         }
 
         // Raised rim + ejecta blanket: thickness ~ (R/r)^3, continuous at the rim, patchy further out.
-        int rimHeight = r >= 6.5f ? 2 : 1;
+        int rimHeight = r >= 7.5f ? 2 : 1;
         int reach = Mth.ceil(r * 2.6f);
         for (int dx = -reach; dx <= reach; dx++) {
             for (int dz = -reach; dz <= reach; dz++) {
                 double dist = Math.sqrt(dx * dx + dz * dz) + (random.nextDouble() - 0.5) * 0.6;
                 if (dist < r * 0.98 || dist > r * 2.6) continue;
-                double thickness = rimHeight * Math.pow(r / Math.max(dist, r), 3) * (dist < r * 1.25 ? 1.6 : 1.0);
+                double thickness = rimHeight * Math.pow(r / Math.max(dist, r), 3) * (dist < r * 1.25 ? 1.2 : 1.0);
                 int layers = (int) thickness + (random.nextDouble() < thickness - (int) thickness ? 1 : 0);
                 int x = center.getX() + dx, z = center.getZ() + dz;
                 if (dist < r * 1.6) {
@@ -172,6 +172,13 @@ final class Crater {
         BlockPos column = new BlockPos(x, 0, z);
         if (!level.isLoaded(column)) return;
         int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        // Ejecta settles as a blanket, not in pillars: only pile up where at least two neighbours are as high.
+        int level4 = 0;
+        if (level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x + 1, z) >= top) level4++;
+        if (level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x - 1, z) >= top) level4++;
+        if (level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z + 1) >= top) level4++;
+        if (level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z - 1) >= top) level4++;
+        if (level4 < 2) return;
         BlockState below = level.getBlockState(new BlockPos(x, top - 1, z));
         BlockState to = crushed(below.is(Blocks.GRASS_BLOCK) ? Blocks.DIRT.defaultBlockState() : below, roll);
         if (to.isAir() || to == below && !below.is(BlockTags.SAND)) {
