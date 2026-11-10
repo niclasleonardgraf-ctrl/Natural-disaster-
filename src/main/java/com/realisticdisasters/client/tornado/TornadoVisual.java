@@ -155,8 +155,8 @@ public final class TornadoVisual implements DisasterVisual {
         // Wall cloud / mesocyclone base: present from the warning phase on, slowly turning.
         int wallCount = count(budget * 0.2f * Math.max(0.35f, s));
         for (int i = 0; i < wallCount; i++) {
-            float ring = 1.2f + RANDOM.nextFloat() * 2.6f;           // lowered wall cloud around the funnel top
-            spawnAt(level, ModRegistries.WALL_CLOUD.get(), d, 0.9f, ring * core, ring, height);
+            float ring = 0.8f + RANDOM.nextFloat() * 3.0f;           // lowered wall cloud around the funnel top
+            spawnAt(level, ModRegistries.WALL_CLOUD.get(), d, 0.86f, ring * core, ring, height);
         }
         // Storm deck: sparse, huge, slowly turning cloud base that covers the sky for ~150 blocks.
         int deckCount = count((1.6f + d.intensity * 0.3f) * Math.max(0.3f, s) * Math.max(0.5f, density));
@@ -182,14 +182,16 @@ public final class TornadoVisual implements DisasterVisual {
         }
 
         // Condensation funnel lowering from the cloud base.
-        float bottom = (1f - td) * 0.85f;
+        float bottom = (1f - td) * 0.78f;
         if (td > 0.02f || d.phase == Phase.BUILDUP) {
-            int funnelCount = count(budget * 1.8f * s);
+            int funnelCount = count(budget * 2.4f * s);
             for (int i = 0; i < funnelCount; i++) {
                 // bias toward the lower funnel, where it is thin and needs density to read as solid
                 float u = RANDOM.nextFloat();
-                float h = bottom + (u * u) * (0.9f - bottom);
-                float jitter = 0.78f + RANDOM.nextFloat() * 0.3f;
+                // stop below the flare: the soft wall cloud takes over there (crisp funnel puffs look like bubbles)
+                float h = bottom + (u * u) * (0.8f - bottom);
+                // mostly a tight outer shell (crisp edge) plus some fill
+                float jitter = RANDOM.nextFloat() < 0.75f ? 0.9f + RANDOM.nextFloat() * 0.1f : 0.4f + RANDOM.nextFloat() * 0.5f;
                 spawnAt(level, ModRegistries.FUNNEL_CLOUD.get(), d, h, funnelRadius(d, h) * jitter, jitter, height);
             }
         }

@@ -100,6 +100,20 @@ def fbm(size, rng, octaves=5, base=4):
     return out / total
 
 
+def deck_cloud(seed, size=64):
+    """Cloud-base puff: very soft edges (no visible disc) so many overlap into one smooth, flat mass."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    n = fbm(size, rng, octaves=5, base=3)
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    r = np.sqrt(x * x + (y * 1.25) ** 2)          # slightly flattened
+    fall = np.clip(1 - r, 0, 1) ** 1.8           # long, gentle falloff to zero at the edge
+    a = np.clip(fall * (0.55 + 0.9 * n), 0, 1)
+    light = np.clip(0.66 + 0.2 * (-y * 0.5 + 0.5) + 0.18 * (n - 0.5), 0, 1)
+    rgb = (light * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
+
+
 def soft_cloud(seed, size=64, density=1.0, wispy=False):
     """Soft, volumetric-looking cloud puff: noisy round falloff for alpha, top-lit shading for colour."""
     import numpy as np
@@ -119,6 +133,20 @@ def soft_cloud(seed, size=64, density=1.0, wispy=False):
     rgb = (light * 255).astype("uint8")
     img = np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")])
     return Image.fromarray(img, "RGBA")
+
+
+def smooth_cloud(seed, size=64):
+    """Condensation-funnel puff: dense, smooth core with a soft but well-defined edge and only fine texture."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    n = fbm(size, rng, octaves=5, base=6)
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    r = np.sqrt(x * x + y * y) + (n - 0.5) * 0.18
+    t = np.clip((0.95 - r) / 0.35, 0, 1)
+    a = t * t * (3 - 2 * t)
+    light = np.clip(0.7 + 0.18 * (-y * 0.5 + 0.5) + 0.12 * (n - 0.5), 0, 1)
+    rgb = (light * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
 
 
 def rain_shaft(seed, size=64):
@@ -144,7 +172,8 @@ def write(img, name):
 def main():
     # Realistic, soft 64x64 textures for the storm volume (tinted in code).
     for i in range(4):
-        write(soft_cloud(100 + i), f"funnel_cloud_{i}")
+        write(smooth_cloud(100 + i), f"funnel_cloud_{i}")
+        write(deck_cloud(500 + i), f"deck_cloud_{i}")
         write(soft_cloud(200 + i, density=0.85, wispy=True), f"dust_cloud_{i}")
         write(rain_shaft(400 + i), f"rain_shaft_{i}")
         write(debris_texture(300 + i), f"storm_debris_{i}")

@@ -81,7 +81,7 @@ public class VortexParticle extends SingleQuadParticle {
                 lifetime = 160 + r.nextInt(120);
                 rise = 0f;
                 spin = jitter >= 4f ? 0.0025f + r.nextFloat() * 0.002f : 0.01f + r.nextFloat() * 0.008f;
-                shade = 0.26f + r.nextFloat() * 0.12f;
+                shade = (jitter >= 4f ? 0.27f : 0.22f) + r.nextFloat() * 0.06f;   // low contrast = smooth base
                 baseR = shade * 0.94f; baseG = shade * 0.98f; baseB = shade * 1.06f;
                 minBlockLight = 5;
                 translucent = true;
@@ -157,7 +157,7 @@ public class VortexParticle extends SingleQuadParticle {
         float height = TornadoVisual.height(d);
         float core = TornadoVisual.coreRadius(d);
         float strength = d.strength();
-        heightFrac = Math.min(1.0f, heightFrac + rise);
+        heightFrac = Math.min(kind == Kind.CLOUD ? 0.8f : 1.0f, heightFrac + rise);
 
         double r;
         double ny;
@@ -166,16 +166,18 @@ public class VortexParticle extends SingleQuadParticle {
             case CLOUD -> {
                 r = TornadoVisual.funnelRadius(d, heightFrac) * jitter;
                 ny = c.y + heightFrac * height;
-                targetSize = Mth.clamp((float) r * 0.85f, 0.9f, 6.0f) * sizeVar;
+                targetSize = Mth.clamp((float) r * 0.7f, 0.8f, 5.0f) * (0.85f + 0.3f * (sizeVar - 0.75f) * 2f) * 0.9f;
                 spinScale *= (float) (1.3 - 0.75 * heightFrac);   // tighter = faster
             }
             case WALL -> {
                 // Flat-bottomed: all wall-cloud and deck particles share one base height, only the tops vary.
                 r = core * jitter;
                 boolean deck = jitter >= 4f;
-                double base = c.y + height * (deck ? 0.97 : 0.9);
-                ny = base + (deck ? 3.5 : 2.0) * sizeVar;
-                targetSize = deck ? (10f + jitter * 0.6f) * sizeVar : (5f + jitter * 0.8f) * sizeVar;
+                // Supercell bases are flat: little vertical spread, big overlapping puffs. The wall cloud is a
+                // distinct lowered step around the funnel.
+                double base = c.y + height * (deck ? 0.98 : 0.86);
+                ny = base + (deck ? 1.2 : 1.5) * sizeVar;
+                targetSize = deck ? (14f + jitter * 0.6f) * sizeVar : (8f + jitter * 1.2f) * sizeVar;
             }
             case DEBRIS -> {
                 if (heightFrac > 0.18f) radial += 0.18f;            // thrown out once lifted
