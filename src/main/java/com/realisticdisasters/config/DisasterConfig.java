@@ -33,6 +33,16 @@ public final class DisasterConfig {
     public static final ModConfigSpec.BooleanValue TORNADO_CHANGES_WEATHER;
     public static final ModConfigSpec.ConfigValue<List<? extends String>> TORNADO_BIOMES;
 
+    // ---- volcano ----
+    public static final ModConfigSpec.BooleanValue VOLCANO_ENABLED;
+    public static final ModConfigSpec.IntValue VOLCANO_WEIGHT;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> VOLCANO_BIOMES;
+    public static final ModConfigSpec.IntValue VOLCANO_MAX_BOMBS;
+    public static final ModConfigSpec.DoubleValue VOLCANO_DURATION_SCALE;
+    public static final ModConfigSpec.BooleanValue VOLCANO_BUILD_CONE;
+    public static final ModConfigSpec.BooleanValue VOLCANO_LAVA_FLOWS;
+    public static final ModConfigSpec.IntValue VOLCANO_COOLING_TICKS;
+
     static {
         B.push("general");
         NATURAL_SPAWNING = B.comment("Whether disasters start naturally near players.")
@@ -78,6 +88,27 @@ public final class DisasterConfig {
                         "minecraft:meadow", "minecraft:forest", "minecraft:birch_forest", "minecraft:flower_forest",
                         "minecraft:swamp", "minecraft:badlands", "minecraft:wooded_badlands"),
                         () -> "minecraft:plains", o -> o instanceof String);
+        B.pop();
+
+        B.push("volcano");
+        VOLCANO_ENABLED = B.define("enabled", true);
+        VOLCANO_WEIGHT = B.comment("Relative weight when picking a natural disaster.")
+                .defineInRange("weight", 8, 0, 1000);
+        VOLCANO_BIOMES = B.comment("Biomes (ids or #tags) where volcanoes can erupt naturally.")
+                .defineListAllowEmpty("biomes", List.of(
+                        "#minecraft:is_mountain", "minecraft:windswept_hills", "minecraft:windswept_gravelly_hills",
+                        "minecraft:windswept_forest"),
+                        () -> "#minecraft:is_mountain", o -> o instanceof String);
+        VOLCANO_MAX_BOMBS = B.comment("Max lava bombs in the air at once per volcano (scaled by intensity / 5).")
+                .defineInRange("maxBombs", 40, 0, 400);
+        VOLCANO_DURATION_SCALE = B.comment("Multiplier for how long the eruption lasts.")
+                .defineInRange("durationScale", 1.0, 0.1, 10.0);
+        VOLCANO_BUILD_CONE = B.comment("Build a small cinder cone around the vent when the ground there is flat.")
+                .define("buildCone", true);
+        VOLCANO_LAVA_FLOWS = B.comment("Let lava flows pour downhill from the vent.")
+                .define("lavaFlows", true);
+        VOLCANO_COOLING_TICKS = B.comment("Ticks before placed lava cools into basalt / blackstone (always cooled when the volcano ends).")
+                .defineInRange("coolingTicks", 900, 20, 72_000);
         B.pop();
     }
 

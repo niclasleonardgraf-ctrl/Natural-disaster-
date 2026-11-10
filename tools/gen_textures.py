@@ -164,6 +164,35 @@ def rain_shaft(seed, size=64):
     return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
 
 
+def ash_cloud(seed, size=64):
+    """Volcanic ash billow: dense, cauliflower-like puff with a crisp, lumpy rim and a dark, shadowed underside."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    n = fbm(size, rng, octaves=6, base=4)
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    r = np.sqrt(x * x + y * y) + (n - 0.5) * 0.55     # lumpy outline
+    t = np.clip((0.92 - r) / 0.28, 0, 1)
+    a = t * t * (3 - 2 * t) * np.clip(0.75 + 0.6 * n, 0, 1)
+    # strong top/bottom contrast: lit crown, dark base (the colour itself is tinted in code)
+    light = np.clip(0.45 + 0.4 * (-y * 0.5 + 0.5) + 0.3 * (n - 0.5), 0, 1)
+    rgb = (light * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (np.clip(a, 0, 1) * 255).astype("uint8")]), "RGBA")
+
+
+def ash_flake(seed, size=16):
+    """Falling ash flake: a small, soft, slightly irregular grey speck."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    n = fbm(size, rng, octaves=3, base=2)
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    r = np.sqrt((x * (1 + 0.4 * n)) ** 2 + (y * (1.3 - 0.4 * n)) ** 2)
+    t = np.clip((0.75 - r) / 0.45, 0, 1)
+    a = t * t * (3 - 2 * t)
+    light = np.clip(0.72 + 0.2 * (n - 0.5), 0, 1)
+    rgb = (light * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
+
+
 def write(img, name):
     os.makedirs(PARTICLES, exist_ok=True)
     img.save(os.path.join(PARTICLES, name + ".png"))
@@ -177,6 +206,9 @@ def main():
         write(soft_cloud(200 + i, density=0.85, wispy=True), f"dust_cloud_{i}")
         write(rain_shaft(400 + i), f"rain_shaft_{i}")
         write(debris_texture(300 + i), f"storm_debris_{i}")
+        write(ash_cloud(600 + i), f"ash_cloud_{i}")
+    for i in range(3):
+        write(ash_flake(700 + i), f"ash_fall_{i}")
 
     # 16x16 mod icon (tornado silhouette on a storm sky), upscaled with nearest neighbour for the mod list.
     icon = Image.new("RGBA", (16, 16), (78, 91, 71, 255))

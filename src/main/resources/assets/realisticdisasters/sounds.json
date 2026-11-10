@@ -14,5 +14,21 @@
   "disaster.wind_gust": {
     "subtitle": "subtitles.realisticdisasters.wind_gust",
     "sounds": ["realisticdisasters:wind_gust1", "realisticdisasters:wind_gust2", "realisticdisasters:wind_gust3"]
+  },
+  "disaster.volcano.rumble": {
+    "subtitle": "subtitles.realisticdisasters.volcano.rumble",
+    "sounds": [{ "name": "realisticdisasters:volcano_rumble", "stream": true, "attenuation_distance": 128 }]
+  },
+  "disaster.volcano.distant": {
+    "subtitle": "subtitles.realisticdisasters.volcano.distant",
+    "sounds": [{ "name": "realisticdisasters:volcano_distant", "stream": true }]
+  },
+  "disaster.volcano.blast": {
+    "subtitle": "subtitles.realisticdisasters.volcano.blast",
+    "sounds": ["realisticdisasters:volcano_blast1", "realisticdisasters:volcano_blast2", "realisticdisasters:volcano_blast3"]
+  },
+  "disaster.volcano.bomb_impact": {
+    "subtitle": "subtitles.realisticdisasters.volcano.bomb_impact",
+    "sounds": [{ "name": "realisticdisasters:bomb_impact1", "attenuation_distance": 48 }, { "name": "realisticdisasters:bomb_impact2", "attenuation_distance": 48 }]
   }
 }
