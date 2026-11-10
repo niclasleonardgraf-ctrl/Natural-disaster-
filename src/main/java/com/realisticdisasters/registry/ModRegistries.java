@@ -40,6 +40,8 @@ public final class ModRegistries {
             PARTICLES.register("dust_cloud", () -> new SimpleParticleType(true));
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> QUAKE_DUST =
             PARTICLES.register("quake_dust", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> COLLAPSE_DUST =
+            PARTICLES.register("collapse_dust", () -> new SimpleParticleType(true));
 
     // Data-driven damage type (data/realisticdisasters/damage_type/tornado.json)
     public static final ResourceKey<DamageType> TORNADO_DAMAGE =

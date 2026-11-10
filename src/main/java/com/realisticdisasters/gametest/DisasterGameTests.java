@@ -190,7 +190,8 @@ public final class DisasterGameTests {
         helper.succeedWhen(() -> {
             helper.assertTrue(DisasterManager.active(helper.getLevel()).contains(quake), "earthquake should be active");
             long opened = ground.entrySet().stream()
-                    .filter(e -> !e.getValue().isAir() && helper.getLevel().getBlockState(e.getKey()).isAir()).count();
+                    .filter(e -> !e.getValue().isAir() && (helper.getLevel().getBlockState(e.getKey()).isAir()
+                            || helper.getLevel().getBlockState(e.getKey()).is(Blocks.WATER))).count();
             helper.assertTrue(opened >= 20, "fissures have not opened enough ground yet (" + opened + " blocks)");
             long damaged = structures.entrySet().stream()
                     .filter(e -> !e.getValue().isAir() && helper.getLevel().getBlockState(e.getKey()) != e.getValue()).count();
@@ -200,12 +201,20 @@ public final class DisasterGameTests {
                     || structures.entrySet().stream().anyMatch(e -> helper.getLevel().getBlockState(e.getKey()).is(Blocks.CRACKED_STONE_BRICKS)),
                     "stone bricks should crack");
             DisasterManager.stop(helper.getLevel(), quake.id(), false);
+            // Don't let debris still in flight land in the next test's arena.
+            helper.getLevel().getEntitiesOfClass(net.minecraft.world.entity.item.FallingBlockEntity.class,
+                    helper.getBounds().inflate(32)).forEach(net.minecraft.world.entity.Entity::discard);
         });
     }
 
     private static void earthquakeRespectsBlockToggle(GameTestHelper helper) {
         DisasterConfig.BLOCK_DESTRUCTION.set(false);
+        // Inner area only: the arena edges sit next to the neighbouring tests' arenas.
         var before = snapshot(helper, 0, 20);
+        before.keySet().removeIf(p -> {
+            BlockPos r = helper.relativePos(p);
+            return r.getX() < 4 || r.getX() > 35 || r.getZ() < 4 || r.getZ() > 35;
+        });
         Disaster quake = startEarthquake(helper, 5, Phase.PEAK);
         int[] debris = {0};
         helper.onEachTick(() -> debris[0] += helper.getLevel().getEntitiesOfClass(

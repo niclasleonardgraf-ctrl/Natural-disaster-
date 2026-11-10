@@ -32,6 +32,7 @@ import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.state.BlockState;
@@ -50,6 +51,11 @@ public class EarthquakeDisaster extends Disaster {
     public static final int D_RADIUS = 0, D_TREMOR = 1, D_CRACKING = 2, D_TIP_COUNT = 3, D_TIPS = 4;
     /** Number of fissure tips synced (each as dx, dz relative to the epicentre at D_TIPS + 2 * n). */
     public static final int MAX_SYNCED_TIPS = 3;
+    /**
+     * D_ROLL: low-frequency surface-wave motion 0..1 (the "rolling" felt far away and late in the shock);
+     * D_DUST: how much dust collapses and rockfalls have thrown up 0..1 (lingers and settles slowly).
+     */
+    public static final int D_ROLL = D_TIPS + MAX_SYNCED_TIPS * 2, D_DUST = D_ROLL + 1;
 
     private static final int MAX_PENDING_CHECKS = 2048;
 
@@ -67,6 +73,10 @@ public class EarthquakeDisaster extends Disaster {
     private final Set<BlockPos> pendingSet = new HashSet<>();
 
     private float tremor;
+    private float roll;
+    private float dust;
+    private float noise, noiseTarget;
+    private int noiseTimer;
     private int shockAge = 1000;
     private int nextShock;
     private float shockAmp;
@@ -77,12 +87,21 @@ public class EarthquakeDisaster extends Disaster {
         double x, z, heading;
         int step;
         final int steps;
+        /** 1 for a main rupture, smaller for the short en-echelon cracks that branch off it. */
+        final float scale;
+        /** Which side drops (fault scarp): -1 / +1, and by how many blocks (0 = no vertical offset). */
+        final int throwSide, throwBlocks;
+        int nextKink;
 
-        Fissure(double x, double z, double heading, int steps) {
+        Fissure(double x, double z, double heading, int steps, float scale, int throwSide, int throwBlocks) {
             this.x = x;
             this.z = z;
             this.heading = heading;
             this.steps = steps;
+            this.scale = scale;
+            this.throwSide = throwSide;
+            this.throwBlocks = throwBlocks;
+            this.nextKink = 2;
         }
 
         boolean done() {
@@ -138,7 +157,11 @@ public class EarthquakeDisaster extends Disaster {
             n++;
         }
         data[D_TIP_COUNT] = n;
-        return data;
+        float[] full = new float[D_DUST + 1];
+        System.arraycopy(data, 0, full, 0, data.length);
+        full[D_ROLL] = roll;
+        full[D_DUST] = dust;
+        return full;
     }
 
     // ------------------------------------------------------------------ lifecycle
@@ -171,26 +194,67 @@ public class EarthquakeDisaster extends Disaster {
             if (tremor > 0.25f) crumble();
             growFissures();
             processSupportChecks();
+            sweepCanopies();
         }
         if (age() % 20 == 0) debris.removeIf(fb -> fb.isRemoved() || fb.time > 200);
+        dust *= 0.9985f; // thrown-up dust lingers for half a minute or so, then settles
+    }
+
+    public float dust() {
+        return dust;
+    }
+
+    public float roll() {
+        return roll;
+    }
+
+    private void addDust(float amount) {
+        dust = Math.min(1f, dust + amount);
     }
 
     // ------------------------------------------------------------------ ground motion
 
     /**
-     * Foreshocks during the warning, an escalating main shock, a rolling peak and decaying aftershocks.
-     * Shocks are short pulses on top of the smooth base level.
+     * Ground motion modelled on real records: small foreshocks during the warning; the main shock starts with a sharp
+     * P-wave jolt, the stronger S-wave shaking arrives a few seconds later, and long-period surface waves ("rolling")
+     * build up behind it and outlast it. Aftershocks decay through the aftermath. Shaking is irregular (smoothed
+     * random noise), not a regular oscillation.
      */
     private void updateTremor() {
         float p = phaseProgress();
-        int t = age();
-        float wobble = (float) (0.5 + 0.25 * Math.sin(t * 0.13) + 0.25 * Math.sin(t * 0.047 + 1.3));
-        float base = switch (phase()) {
-            case WARNING -> 0.04f * smooth(p);
-            case BUILDUP -> 0.15f + 0.65f * smooth(p) * (0.85f + 0.15f * wobble);
-            case PEAK -> 0.78f + 0.22f * wobble;
-            case AFTERMATH -> 0.55f * (1f - smooth(Math.min(1f, p * 2.5f)));
-        };
+        // Irregular amplitude envelope: a new random target every few ticks, glided toward.
+        if (--noiseTimer <= 0) {
+            noiseTarget = random.nextFloat();
+            noiseTimer = 3 + random.nextInt(9);
+        }
+        noise += (noiseTarget - noise) * 0.25f;
+
+        float base, rollTarget;
+        switch (phase()) {
+            case WARNING -> {
+                base = 0.03f * smooth(p);
+                rollTarget = 0f;
+            }
+            case BUILDUP -> {
+                // P-wave: a sharp, short jolt right at the start of the main shock.
+                float pw = p < 0.12f ? (float) Math.sin(Math.PI * p / 0.12f) : 0f;
+                // S-wave: arrives a few seconds later and builds fast.
+                float sw = smooth((p - 0.25f) / 0.35f);
+                base = Math.max(0.35f * pw + 0.05f, (0.45f + 0.4f * noise) * sw);
+                rollTarget = smooth((p - 0.45f) / 0.55f) * 0.8f;
+            }
+            case PEAK -> {
+                // Strong motion slowly loses its sharpness toward the end; rolling persists.
+                float fade = 1f - 0.25f * smooth((p - 0.7f) / 0.3f);
+                base = (0.6f + 0.4f * noise) * fade;
+                rollTarget = 0.75f + 0.25f * noise;
+            }
+            default -> {
+                base = 0.5f * (1f - smooth(Math.min(1f, p * 3f))) * (0.6f + 0.4f * noise);
+                rollTarget = 0.7f * (1f - smooth(Math.min(1f, p * 1.6f)));
+            }
+        }
+        roll += (rollTarget - roll) * 0.03f;
 
         // Discrete shocks: foreshocks in the warning, jolts in the peak, aftershocks afterwards.
         if (--nextShock <= 0) {
@@ -200,8 +264,8 @@ public class EarthquakeDisaster extends Disaster {
                     nextShock = 90 + random.nextInt(110);
                 }
                 case BUILDUP, PEAK -> {
-                    shockAmp = 0.2f + 0.1f * random.nextFloat();
-                    nextShock = 50 + random.nextInt(80);
+                    shockAmp = 0.15f + 0.15f * random.nextFloat();
+                    nextShock = 40 + random.nextInt(70);
                 }
                 case AFTERMATH -> {
                     shockAmp = (0.25f + 0.35f * random.nextFloat()) * (1f - p);
@@ -211,7 +275,8 @@ public class EarthquakeDisaster extends Disaster {
             shockAge = 0;
         }
         shockAge++;
-        float pulse = shockAge < 40 ? shockAmp * (float) Math.sin(Math.PI * shockAge / 40.0) : 0f;
+        // Each shock: sharp onset, longer ringing tail.
+        float pulse = shockAge < 50 ? shockAmp * (shockAge < 6 ? shockAge / 6f : (float) Math.exp(-(shockAge - 6) / 14.0)) : 0f;
         tremor = Mth.clamp(base + pulse, 0f, 1f);
     }
 
@@ -267,31 +332,48 @@ public class EarthquakeDisaster extends Disaster {
         while (fissures.size() < wanted) {
             double a = random.nextDouble() * Math.PI * 2;
             double off = random.nextDouble() * radius * 0.25;
+            int throwBlocks = intensity >= 5 ? 1 + random.nextInt(2) : intensity >= 3 ? 1 : 0;
             fissures.add(new Fissure(pos.x + Math.cos(a) * off, pos.z + Math.sin(a) * off,
-                    random.nextDouble() * Math.PI * 2, fissureSteps));
+                    random.nextDouble() * Math.PI * 2, fissureSteps, 1f, random.nextBoolean() ? 1 : -1, throwBlocks));
         }
 
         int interval = Math.max(2, 9 - intensity);
         if (age() % interval != 0) return;
         BlockChangeQueue queue = DisasterManager.blockQueue(level);
+        List<Fissure> branches = new ArrayList<>();
         for (Fissure f : fissures) {
             if (f.done()) continue;
-            f.heading += (random.nextDouble() - 0.5) * 0.5;
+            // Real ruptures zig-zag: mostly straight runs with sudden kinks, plus small wander.
+            f.heading += (random.nextDouble() - 0.5) * 0.18;
+            if (--f.nextKink <= 0) {
+                f.heading += (random.nextBoolean() ? 1 : -1) * (0.35 + random.nextDouble() * 0.45);
+                f.nextKink = 2 + random.nextInt(4);
+            }
             f.x += Math.cos(f.heading);
             f.z += Math.sin(f.heading);
             float along = (f.step + 0.5f) / f.steps;
             f.step++;
             // Widest in the middle, tapering to a hairline at both ends.
             float taper = (float) Math.sin(Math.PI * along);
-            float half = fissureHalfWidth * (0.35f + 0.65f * taper) * (0.85f + 0.3f * random.nextFloat());
-            int depth = Math.max(2, Math.round(fissureDepth * (0.4f + 0.6f * taper) * (0.8f + 0.4f * random.nextFloat())));
-            carveStep(queue, f, half, depth);
+            float half = fissureHalfWidth * f.scale * (0.35f + 0.65f * taper) * (0.75f + 0.5f * random.nextFloat());
+            int depth = Math.max(1, Math.round(fissureDepth * f.scale * (0.4f + 0.6f * taper) * (0.7f + 0.6f * random.nextFloat())));
+            carveStep(queue, f, half, depth, taper);
             lastCrack = age();
+            // En-echelon cracks: short, narrow fractures splaying off the main rupture at an angle.
+            if (f.scale >= 1f && random.nextFloat() < 0.14f && fissures.size() + branches.size() < maxFissures * 6) {
+                double side = random.nextBoolean() ? 1 : -1;
+                branches.add(new Fissure(f.x, f.z, f.heading + side * (0.5 + random.nextDouble() * 0.5),
+                        3 + random.nextInt(4), 0.45f, 0, 0));
+            }
         }
+        fissures.addAll(branches);
     }
 
-    /** One batched step: every column across the fissure at its tip becomes one queued change. */
-    private void carveStep(BlockChangeQueue queue, Fissure f, float half, int depth) {
+    /**
+     * One batched step: every column across the fissure at its tip becomes one queued change. Columns just outside the
+     * crack may slump into it (crumbling edges), and on the down-thrown side the ground drops to form a scarp.
+     */
+    private void carveStep(BlockChangeQueue queue, Fissure f, float half, int depth, float taper) {
         double px = -Math.sin(f.heading), pz = Math.cos(f.heading);
         Set<Long> columns = new HashSet<>();
         for (double o = -half; o <= half + 1.0e-3; o += 0.5) {
@@ -302,6 +384,60 @@ public class EarthquakeDisaster extends Disaster {
                 if (!queue.add(l -> carveColumn(x, z, d))) return;
             }
         }
+        // Crumbling edges: rim blocks break off and slide into the crack.
+        for (int side = -1; side <= 1; side += 2) {
+            if (random.nextFloat() > 0.35f * taper * f.scale) continue;
+            double o = side * (half + 1.0);
+            int x = Mth.floor(f.x + px * o), z = Mth.floor(f.z + pz * o);
+            if (columns.contains(BlockPos.asLong(x, 0, z))) continue;
+            Vec3 push = new Vec3(-px * side * 0.12, 0.05, -pz * side * 0.12);
+            queue.add(l -> slough(x, z, push));
+        }
+        // Fault scarp: the down-thrown side drops a block or two along the crack.
+        if (f.throwBlocks > 0 && taper > 0.25f) {
+            for (double o = half + 0.5; o <= half + 3.0; o += 0.5) {
+                double oo = f.throwSide * o;
+                int x = Mth.floor(f.x + px * oo), z = Mth.floor(f.z + pz * oo);
+                if (columns.add(BlockPos.asLong(x, 0, z))) {
+                    int drop = taper > 0.6f ? f.throwBlocks : 1;
+                    queue.add(l -> dropColumn(x, z, drop));
+                }
+            }
+        }
+    }
+
+    /** The top ground block of a rim column breaks off and slides into the open crack. */
+    private void slough(int x, int z, Vec3 push) {
+        if (isFinished() || !level.isLoaded(new BlockPos(x, 0, z))) return;
+        int ground = groundLevel(x, z);
+        BlockPos bp = new BlockPos(x, ground, z);
+        BlockState st = level.getBlockState(bp);
+        if (!terrain(st) || st.hasBlockEntity()) return;
+        // Only if there really is an opening next to it.
+        BlockPos into = BlockPos.containing(x + 0.5 + push.x * 8, ground, z + 0.5 + push.z * 8);
+        if (solid(level.getBlockState(into))) return;
+        collapse(bp, st, push);
+    }
+
+    /** Lowers the ground surface of a column by {@code drop} blocks (the top block moves down, keeping grass on top). */
+    private void dropColumn(int x, int z, int drop) {
+        if (isFinished() || !level.isLoaded(new BlockPos(x, 0, z))) return;
+        int ground = groundLevel(x, z);
+        if (Math.abs(ground - pos.y) > 24) return;
+        BlockPos top = new BlockPos(x, ground, z);
+        BlockState topState = level.getBlockState(top);
+        if (!terrain(topState)) return;
+        for (int k = 0; k <= drop; k++) {
+            BlockPos bp = top.below(k);
+            BlockState st = level.getBlockState(bp);
+            if (!terrain(st) || !DisasterProtection.canModify(level, bp, st)) return;
+        }
+        BlockPos above = top.above();
+        if (!level.getBlockState(above).isAir() && level.getBlockState(above).canBeReplaced()) level.destroyBlock(above, false);
+        for (int k = 0; k < drop; k++) level.setBlock(top.below(k), Blocks.AIR.defaultBlockState(), 3);
+        level.setBlock(top.below(drop), topState, 3);
+        queueCheck(above);
+        for (Direction dir : Direction.Plane.HORIZONTAL) queueCheck(above.relative(dir));
     }
 
     private void carveColumn(int x, int z, int depth) {
@@ -312,6 +448,7 @@ public class EarthquakeDisaster extends Disaster {
         // Don't tear up mountainsides far above / below the epicentre: the fault runs through the ground near it.
         if (Math.abs(ground - pos.y) > 24) return;
         boolean first = true;
+        int bottom = Integer.MAX_VALUE;
         for (int y = ground; y > ground - depth && y > level.getMinY() + 1; y--) {
             BlockPos bp = new BlockPos(x, y, z);
             BlockState st = level.getBlockState(bp);
@@ -323,9 +460,16 @@ public class EarthquakeDisaster extends Disaster {
             if (!DisasterProtection.canModify(level, bp, st)) return;
             if (first) {
                 level.levelEvent(2001, bp, Block.getId(st)); // block-break particles + sound at the surface
+                addDust(0.0012f);
                 first = false;
             }
             level.setBlock(bp, Blocks.AIR.defaultBlockState(), 3);
+            bottom = y;
+        }
+        // Groundwater: in low-lying ground, the bottom of the crack floods.
+        if (bottom <= level.getSeaLevel() && ground <= level.getSeaLevel() + 4 && random.nextFloat() < 0.6f) {
+            BlockPos bp = new BlockPos(x, bottom, z);
+            if (level.getBlockState(bp).isAir()) level.setBlock(bp, Blocks.WATER.defaultBlockState(), 3);
         }
         // Whatever stood on this column (walls, fences, plants) lost its footing.
         queueCheck(new BlockPos(x, ground + 1, z));
@@ -401,7 +545,7 @@ public class EarthquakeDisaster extends Disaster {
         // Masonry cracks before it fails.
         BlockState cracked = crackedVariant(st);
         if (cracked != null) {
-            if (random.nextFloat() < 0.08f * tremor * chanceScale * intensity) {
+            if (random.nextFloat() < 0.2f * tremor * chanceScale * intensity) {
                 DisasterManager.blockQueue(level).add(l -> replace(bp, st, cracked));
             }
             return;
@@ -480,7 +624,41 @@ public class EarthquakeDisaster extends Disaster {
             fb.hurtMarked = true;
         }
         debris.add(fb);
+        addDust(terrain(expected) ? 0.003f : 0.005f);
         queueNeighbours(bp);
+        // A falling trunk brings its canopy down too (checked once vanilla has updated the leaves' log distance).
+        if (expected.is(BlockTags.LOGS) && canopySweeps.size() < 64) canopySweeps.add(new long[]{bp.asLong(), age() + 30});
+    }
+
+    /** Pending canopy sweeps: {block pos, due age}. */
+    private final List<long[]> canopySweeps = new ArrayList<>();
+
+    /**
+     * Natural leaves that no longer connect to any log (vanilla's leaf DISTANCE reached 7) come down right away
+     * instead of floating in the air until random-tick decay gets to them minutes later.
+     */
+    private void sweepCanopies() {
+        if (canopySweeps.isEmpty()) return;
+        var it = canopySweeps.iterator();
+        while (it.hasNext()) {
+            long[] sweep = it.next();
+            if (sweep[1] > age()) continue;
+            it.remove();
+            BlockPos c = BlockPos.of(sweep[0]);
+            BlockChangeQueue queue = DisasterManager.blockQueue(level);
+            for (BlockPos p : BlockPos.betweenClosed(c.offset(-4, -2, -4), c.offset(4, 8, 4))) {
+                if (!level.isLoaded(p)) continue;
+                BlockState st = level.getBlockState(p);
+                if (!st.is(BlockTags.LEAVES) || !st.hasProperty(LeavesBlock.PERSISTENT) || st.getValue(LeavesBlock.PERSISTENT)
+                        || !st.hasProperty(LeavesBlock.DISTANCE) || st.getValue(LeavesBlock.DISTANCE) < LeavesBlock.DECAY_DISTANCE) continue;
+                BlockPos at = p.immutable();
+                queue.add(l -> {
+                    BlockState now = level.getBlockState(at);
+                    if (isFinished() || now != st || !DisasterProtection.canModify(level, at, now)) return;
+                    level.destroyBlock(at, true); // leaf particles + the usual sapling / stick drops
+                });
+            }
+        }
     }
 
     private void queueNeighbours(BlockPos bp) {

@@ -36,18 +36,41 @@ Full design spec: [`docs/SPEC.md`](docs/SPEC.md).
 1. `./gradlew runClient`, create a world with cheats on. Build or stand near a few structures (a house with a roof,
    glass windows, stone-brick walls) to see crumbling; mountains or badlands give rockfalls from overhangs.
 2. `/disaster start earthquake 4 ~ ~ ~` puts the epicentre under you (or omit the position to have it 48 blocks ahead).
-3. Phases: **warning** (~21 s: foreshocks, i.e. short jolts and low rumbles, animals flee, villagers hide),
-   **buildup** (~10 s: the shaking escalates, fissures start to open), **peak** (33–65 s, longer at higher intensity:
-   violent shaking, fissures tear across the ground step by step, roofs and overhangs cave in, wall tops shed blocks,
-   stone bricks crack, glass shatters, dust everywhere), **aftermath** (~25 s: decaying aftershocks, the dust settles).
-4. The shake is strongest at the epicentre and fades with distance (still felt several radii out). Indoors, dust
-   trickles from the ceiling. Afterwards you'll find open fissures, rubble piles and cracked masonry.
+3. Phases: **warning** (~21 s: small foreshocks and low rumbles, animals flee, villagers hide),
+   **buildup** (~10 s: the main shock arrives like in real seismograms: a sharp P-wave jolt, then a few seconds later
+   the much stronger S-wave shaking, with slow rolling surface waves building behind it), **peak** (33–65 s, longer at
+   higher intensity: violent irregular shaking, zig-zag ruptures tear across the ground step by step, roofs and
+   overhangs cave in, wall tops shed blocks, stone bricks crack, glass shatters, collapse dust billows up),
+   **aftermath** (~25 s: the rolling outlasts the jolts, decaying aftershocks, the dust slowly settles).
+4. Near the epicentre the camera jerks irregularly; further out you mostly feel a slow, sea-sick rolling. Indoors,
+   dust trickles from the ceiling; outside, trees shed leaves and ponds slop. Afterwards you'll find open cracks with
+   a stepped fault scarp beside them (intensity 3+), rubble piles, cracked masonry and, in low ground, cracks filled
+   with groundwater.
 5. Intensity scales radius (30–70 blocks), fissure count (1–4), width (1–3) and depth (4–12), what can fall
    (up to hardness 1.6 at intensity 1 / 4.0 at intensity 5), how much an unsupported block needs to stay up, and damage.
 
-What it looks like: the sky and fog take on a dusty khaki-grey haze over the zone, soft translucent grey-brown dust
-billows along the ground and bursts from fissures as they tear open, real block chips hop off the ground around you,
-and the camera combines the shared sway with a fast, jerky rattle that peaks at the epicentre.
+### What the earthquake looks like
+Modelled on real quake footage, survey photos and seismology, while keeping Minecraft's own blocks and renderer:
+- **The sky doesn't change.** Earthquakes don't change the weather. A thin grey-beige haze only builds up from the dust
+  that collapses actually throw up, and it settles again.
+- **Ground motion is the main effect.** The camera itself moves (a small positional jolt and heave, via a client
+  mixin), not just tilts, because real footage is dominated by the camera being thrown back and forth. Strong motion is
+  irregular noise (no regular rhythm) and dies off quickly with distance. The long-period rolling (period ~3 s,
+  elliptical like a Rayleigh wave) carries much further and outlasts the strong shaking.
+- **Dust comes from what breaks.** Where debris lands, a pale grey-beige cloud bursts out, billows up, rolls outward
+  low and wide, and hangs for ~7–14 s. Falling debris trails dust. Opening cracks spurt soil, and loose dry ground
+  (sand, gravel, bare dirt, terracotta) smokes, while grass and rock barely do.
+- **Ground ruptures look like real surface ruptures.** They're narrow, mostly straight runs with sudden kinks
+  (zig-zag), tapered at both ends, with short en-echelon cracks splaying off at an angle. Rim blocks slump into the
+  crack, the down-thrown side drops 1–2 blocks (a fault scarp), and in low-lying ground the bottom floods with
+  groundwater.
+- **Trees topple with their trunks:** when a trunk falls into a crack, its now-unattached canopy comes down too.
+
+Dev visual check for earthquakes: in `build.gradle`'s `clientVisualTest`, set
+`realisticdisasters.autostart` to `earthquake,4,WARNING` and add `systemProperty 'realisticdisasters.quakeScene', 'true'`.
+On a flat world (e.g. the GameTest world copied to `run/saves/VisualTest`) this builds a small test village around the
+epicentre (houses, tower, trees, pond, road), clears the weather, puts you inside the quake zone, and moves you to an
+aerial viewpoint for the aftermath (`EarthquakeDevScene`, dev only).
 
 Shortcut for development: `./gradlew runClientVisualTest` loads the save `run/saves/VisualTest`, moves you onto a
 small pillar, plants a test forest and auto-starts an intensity-4 tornado at peak about 100 blocks away
@@ -100,8 +123,9 @@ client (Dist.CLIENT only)
   ClientDisasters / ClientDisaster   interpolated mirror of server state, fade-out after removal
   EffectsManager             blends all disasters into sky/fog/cloud tint, fog distance, shake, FOV
   DisasterVisual(s)          per-type particles + sounds (tornado/TornadoVisual, earthquake/EarthquakeVisual)
-  earthquake/EarthquakeCamera  extra fast "rattle" camera layer for earthquakes (same config switches as the shake)
-  particle/QuakeDustParticle  free-floating rock-dust puffs
+  earthquake/EarthquakeCamera  earthquake ground motion: irregular strong motion + long-period rolling, angles and position
+  particle/QuakeDustParticle  rock dust: low ground puffs (quake_dust) and billowing collapse clouds (collapse_dust)
+mixin/CameraMixin            lets the earthquake offset the camera position
   particle/VortexParticle    funnel / debris / dust particles that orbit their disaster
   sound/DisasterLoopSound    cross-fading positional (near) and non-attenuated (far) loops
 mixin/ClientLevelMixin       adds environment-attribute layers for sky, fog, cloud colour and sky light
@@ -135,8 +159,11 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
   falling debris lands as rubble (it's capped per quake; blocks over the cap wait their turn).
 - **Earthquake damage:** besides falling debris (vanilla falling-block damage), entities near the epicentre take small
   "shaken" damage at intensity ≥3 during strong shaking, and every grounded entity in the zone gets jostled.
-- **Earthquake camera:** the shared disaster shake (smooth sway) is combined with an earthquake-only high-frequency
-  rattle (`client/earthquake/EarthquakeCamera`), so the foundation classes stay unchanged.
+- **Earthquake camera:** `client/earthquake/EarthquakeCamera` drives both angles (`ViewportEvent.ComputeCameraAngles`)
+  and a small camera *position* offset through a new client mixin (`mixin/CameraMixin`, injected at the end of
+  `Camera#alignWithEntity`, before the culling frustum is built). Both obey `cameraShake` / `cameraShakeStrength`.
+  Measured in the dev scene, at 0.7 radius from an intensity-4 epicentre the peak motion is ~10 cm and ~2°; the
+  foreshocks are ≤1 cm. The quake adds only a little to the shared (sine-based) disaster shake.
 
 ## Known issues
 
@@ -145,6 +172,12 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
 - The vortex is built from soft translucent particles. From inside the funnel, individual puffs can still be seen.
 - Vanilla rain (blue streaks) is unchanged; replacing it would mean overriding the vanilla rain texture for the whole game.
 - The weather change is global (vanilla limitation).
-- Earthquake sounds were also not heard-tested (same reason). The visual check was done with the headless client in the
-  flat GameTest world; fissure shapes were verified by the GameTests rather than by screenshots.
+- Earthquake sounds were also not heard-tested (same reason).
+- The earthquake was compared against documented descriptions of real footage and seismology. Real reference photos
+  couldn't be downloaded in the build container (the image sites refused automated requests), so there was no
+  side-by-side pixel comparison.
+- Camera motion can only be judged from logged amplitudes and frame-to-frame differences in headless screenshots;
+  it hasn't been watched live.
 - Earthquake dust is built from soft translucent puffs; very close up, individual puffs can still be made out.
+- Blocks can't bend or tilt, so swaying trees, buckled roads and tilted buildings are approximated by falling leaves,
+  slumping crack edges and collapsing blocks.

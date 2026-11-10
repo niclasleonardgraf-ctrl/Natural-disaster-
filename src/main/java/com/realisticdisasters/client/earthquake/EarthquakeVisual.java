@@ -20,21 +20,26 @@ import net.minecraft.server.level.ParticleStatus;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.entity.item.FallingBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Earthquake presentation: a dusty haze over the epicentre, camera shake that escalates with the tremor and is
- * strongest near the epicentre (plus a fast rattle layer, see {@link EarthquakeCamera}), dust billowing from the
- * ground and from opening fissures, rock chips hopping off the ground, dust trickling from ceilings, and a layered
- * rumble (deep far rumble, grinding close rumble, cracking rock).
+ * Earthquake presentation, modelled on real footage: the sky stays as it is; the ground motion (irregular strong
+ * motion near the epicentre, slow rolling further out, see {@link EarthquakeCamera}) is the main effect. Dust comes
+ * from where things actually break: collapsing structures and rockfalls throw up billowing clouds that roll outward
+ * and hang in the air, opening fissures spurt soil, loose dry ground smokes, trees shed leaves, ponds slosh and
+ * dust trickles from ceilings. Sound is layered: a deep far rumble, a grinding close rumble and cracking rock.
  */
 public final class EarthquakeVisual implements DisasterVisual {
-    private static final int SKY = 0xA8977A;     // dusty khaki
-    private static final int FOG = 0x9C8B70;
-    private static final int CLOUDS = 0x8E8270;
+    // Collapse dust: desaturated grey-beige (concrete, stone and soil dust), only where dust was thrown up.
+    private static final int DUST_FOG = 0x9A9284;
+    private static final int DUST_SKY = 0xA59C8C;
+
+    private record Falling(Vec3 pos, BlockState state) {}
 
     private static final RandomSource RANDOM = RandomSource.create();
 
@@ -43,6 +48,7 @@ public final class EarthquakeVisual implements DisasterVisual {
         int nextRumble = 20;
         int nextCrack = 10;
         int nextCreak = 30;
+        final java.util.Map<Integer, Falling> falling = new java.util.HashMap<>();
     }
 
     public static float radius(ClientDisaster d) {
@@ -54,32 +60,41 @@ public final class EarthquakeVisual implements DisasterVisual {
         return Mth.clamp(d.data(EarthquakeDisaster.D_TREMOR), 0f, 1f);
     }
 
+    public static float roll(ClientDisaster d) {
+        return Mth.clamp(d.data(EarthquakeDisaster.D_ROLL), 0f, 1f);
+    }
+
+    public static float dust(ClientDisaster d) {
+        return Mth.clamp(d.data(EarthquakeDisaster.D_DUST), 0f, 1f);
+    }
+
     // ------------------------------------------------------------------ atmosphere
 
     @Override
     public void contribute(ClientDisaster d, Vec3 cam, Atmosphere out) {
         double dist = horizontalDistance(d, cam);
         float radius = radius(d);
-        float s = d.strength();
-        float tremor = tremor(d);
 
-        // Dust haze: thrown up by the main shock, hangs over the epicentre and settles in the aftermath.
-        float haze = s * (1f - smoothstep(radius * 0.6f, radius * 3.5f, (float) dist));
-        if (d.phase == Phase.WARNING) haze *= 0.3f;
-        out.sky(SKY, haze * 0.35f);
-        out.clouds(CLOUDS, haze * 0.45f);
-        out.fogColor(FOG, haze * 0.8f);
-        out.darken(haze * (0.04f + d.intensity * 0.02f));
-        out.fog(50f + (5 - d.intensity) * 18f + (float) dist * 0.4f, haze * 0.65f);
+        // Earthquakes don't change the weather or the sky. Haze only comes from dust that collapses and rockfalls
+        // actually threw up (synced from the server), concentrated where it happened and settling over time.
+        // The visible dust is mostly the billowing clouds at collapse sites (particles); this is only the thin
+        // haze that hangs over the whole area afterwards.
+        float haze = dust(d) * (1f - smoothstep(radius * 0.7f, radius * 3f, (float) dist));
+        out.fogColor(DUST_FOG, haze * 0.7f);
+        out.sky(DUST_SKY, haze * 0.15f);
+        out.darken(haze * 0.06f);
+        out.fog(80f + (1f - dust(d)) * 160f + (float) dist * 0.3f, haze * 0.5f);
 
-        // Shake: strongest at the epicentre, still felt (weaker) far beyond the damage radius.
-        float felt = radius * 4f + 80f;
-        float near = 1f - smoothstep(radius * 0.15f, radius * 1.1f, (float) dist);
-        float far = 1f - smoothstep(radius * 0.8f, felt, (float) dist);
-        float scale = 0.3f + 0.16f * d.intensity;
-        out.shake(tremor * scale * (near * 0.85f + far * 0.3f));
-        out.fovPulse(tremor * near * 0.6f);
-        EarthquakeCamera.addRattle(tremor * tremor * (0.4f + 0.12f * d.intensity) * (near + far * 0.25f));
+        // Strong (high-frequency) motion dies off quickly with distance; long-period rolling carries much further.
+        float near = 1f - smoothstep(radius * 0.1f, radius * 1.2f, (float) dist);
+        float far = 1f - smoothstep(radius * 0.8f, radius * 5f + 120f, (float) dist);
+        float jolt = tremor(d) * (0.35f + 0.13f * d.intensity) * (near + far * 0.12f);
+        float roll = roll(d) * (0.3f + 0.14f * d.intensity) * (near * 0.6f + far * 0.7f);
+        double dx = cam.x - d.pos().x, dz = cam.z - d.pos().z;
+        double len = Math.max(1.0e-3, Math.sqrt(dx * dx + dz * dz));
+        EarthquakeCamera.add(jolt, roll, dx / len, dz / len);
+        // A little of the shared sway too, so mixed disasters blend; the quake's own motion does the real work.
+        out.shake(tremor(d) * near * 0.1f * d.intensity / 5f);
     }
 
     // ------------------------------------------------------------------ particles + sound
@@ -90,10 +105,10 @@ public final class EarthquakeVisual implements DisasterVisual {
         d.visualState = st;
         Vec3 cam = camera.position();
         tickSounds(d, st, cam);
-        spawnParticles(d, level, camera, cam);
+        spawnParticles(d, st, level, camera, cam);
     }
 
-    private void spawnParticles(ClientDisaster d, ClientLevel level, Camera camera, Vec3 cam) {
+    private void spawnParticles(ClientDisaster d, State st, ClientLevel level, Camera camera, Vec3 cam) {
         Minecraft mc = Minecraft.getInstance();
         float density = ClientConfig.PARTICLE_DENSITY.get().floatValue();
         ParticleStatus status = mc.options.particles().get();
@@ -104,45 +119,49 @@ public final class EarthquakeVisual implements DisasterVisual {
         };
         if (density <= 0) return;
 
-        float tremor = tremor(d);
-        if (tremor < 0.05f) return;
         Vec3 c = d.pos();
         float radius = radius(d);
         double dist = horizontalDistance(d, cam);
         if (dist > radius + 220) return;
+        Frustum frustum = camera.getCullFrustum();
+
+        // Collapse dust works even when the shaking has stopped (aftershock collapses, settling rubble).
+        tickCollapseDust(d, st, level, frustum, cam, radius, density);
+
+        float tremor = tremor(d);
+        if (tremor < 0.05f) return;
         // Distance LOD.
         float lod = dist < radius ? 1f : dist < radius + 64 ? 0.6f : dist < radius + 140 ? 0.3f : 0.12f;
-        Frustum frustum = camera.getCullFrustum();
         AABB box = new AABB(c.x - radius, c.y - 16, c.z - radius, c.x + radius, c.y + 24, c.z + radius);
-        if (frustum != null && !frustum.isVisible(box)) return; // whole quake zone off-screen
-
-        float budget = (6 + d.intensity * 5) * density * lod;
-
-        // Ground dust: puffs kicked up across the zone. Inside the zone they cluster around the viewer.
+        boolean zoneVisible = frustum == null || frustum.isVisible(box);
+        float budget = (6 + d.intensity * 5) * density * lod * (zoneVisible ? 1f : 0.1f);
         boolean inside = dist < radius;
+
+        // Loose, dry ground (sand, gravel, bare dirt) shakes out low dust; grass and rock barely do.
         double sx = inside ? cam.x : c.x, sz = inside ? cam.z : c.z;
         double spread = inside ? Math.min(radius, 36) : radius;
-        int dustCount = count(budget * 0.45f * tremor * tremor);
-        for (int i = 0; i < dustCount; i++) {
+        int dustTries = count(budget * 0.5f * tremor * tremor);
+        for (int i = 0; i < dustTries; i++) {
             double a = RANDOM.nextDouble() * Math.PI * 2;
             double r = Math.sqrt(RANDOM.nextDouble()) * spread;
             double x = sx + Math.cos(a) * r, z = sz + Math.sin(a) * r;
-            if (sq(x - c.x) + sq(z - c.z) > radius * radius) continue;
-            if (sq(x - cam.x) + sq(z - cam.z) < 36) continue; // never right in the viewer's face
-            spawnDust(level, frustum, x, z, 0.02 + RANDOM.nextDouble() * 0.04, 0.05);
+            if (sq(x - c.x) + sq(z - c.z) > radius * radius || sq(x - cam.x) + sq(z - cam.z) < 36) continue;
+            BlockState ground = groundAt(level, x, z);
+            if (ground == null || !looseGround(ground) && RANDOM.nextFloat() > 0.1f) continue;
+            spawnDust(level, frustum, x, z, 0.01 + RANDOM.nextDouble() * 0.03, 0.08);
         }
 
-        // Fissures: dust plumes and rock chips bursting from the opening tips.
+        // Fissures: soil and rock spurting from the tearing ground at the opening tips.
         float cracking = d.data(EarthquakeDisaster.D_CRACKING);
         int tips = Math.min(EarthquakeDisaster.MAX_SYNCED_TIPS, Math.round(d.data(EarthquakeDisaster.D_TIP_COUNT)));
         if (cracking > 0.05f) {
             for (int t = 0; t < tips; t++) {
                 double tx = c.x + d.data(EarthquakeDisaster.D_TIPS + t * 2);
                 double tz = c.z + d.data(EarthquakeDisaster.D_TIPS + t * 2 + 1);
-                int plume = count(budget * 0.35f * cracking);
+                int plume = count(budget * 0.3f * cracking);
                 for (int i = 0; i < plume; i++) {
                     double x = tx + (RANDOM.nextDouble() - 0.5) * 3, z = tz + (RANDOM.nextDouble() - 0.5) * 3;
-                    spawnDust(level, frustum, x, z, 0.08 + RANDOM.nextDouble() * 0.12, 0.08);
+                    spawnDust(level, frustum, x, z, 0.04 + RANDOM.nextDouble() * 0.08, 0.1);
                 }
                 if (sq(tx - cam.x) + sq(tz - cam.z) < 90 * 90) {
                     int chips = count(budget * 0.5f * cracking);
@@ -153,13 +172,19 @@ public final class EarthquakeVisual implements DisasterVisual {
             }
         }
 
-        // Rock chips hopping off the ground around the viewer when the shaking is strong.
-        if (inside && tremor > 0.4f) {
-            int chips = count(budget * 0.4f * (tremor - 0.3f));
-            for (int i = 0; i < chips; i++) {
-                double a = RANDOM.nextDouble() * Math.PI * 2, r = 2 + RANDOM.nextDouble() * 14;
-                spawnChip(level, cam.x + Math.cos(a) * r, cam.z + Math.sin(a) * r, 0.18);
+        // Around the viewer: gravel and sand grains jump; trees shed leaves; water sloshes.
+        if (inside || dist < radius * 1.5) {
+            float local = tremor * (inside ? 1f : 0.4f);
+            if (local > 0.35f) {
+                int chips = count(budget * 0.3f * (local - 0.3f));
+                for (int i = 0; i < chips; i++) {
+                    double a = RANDOM.nextDouble() * Math.PI * 2, r = 2 + RANDOM.nextDouble() * 12;
+                    double x = cam.x + Math.cos(a) * r, z = cam.z + Math.sin(a) * r;
+                    BlockState ground = groundAt(level, x, z);
+                    if (ground != null && looseGround(ground)) spawnChip(level, x, z, 0.15);
+                }
             }
+            shakeSurroundings(level, cam, local, density);
         }
 
         // Indoors / under overhangs: dust trickles from the ceiling.
@@ -179,6 +204,84 @@ public final class EarthquakeVisual implements DisasterVisual {
                 }
             }
         }
+    }
+
+    /**
+     * Collapsing structures and rockfalls are what really fill the air with dust: falling debris trails dust, and
+     * where a block lands (or shatters) a cloud bursts out low and wide and rolls outward.
+     */
+    private void tickCollapseDust(ClientDisaster d, State st, ClientLevel level, Frustum frustum, Vec3 cam, float radius, float density) {
+        Vec3 c = d.pos();
+        double reach = Math.min(radius * 1.4, 140);
+        AABB area = new AABB(c.x - reach, c.y - 32, c.z - reach, c.x + reach, c.y + 64, c.z + reach);
+        java.util.Set<Integer> seen = new java.util.HashSet<>();
+        for (FallingBlockEntity fb : level.getEntitiesOfClass(FallingBlockEntity.class, area)) {
+            seen.add(fb.getId());
+            st.falling.put(fb.getId(), new Falling(fb.position(), fb.getBlockState()));
+            if (cam.distanceToSqr(fb.position()) < 96 * 96 && RANDOM.nextFloat() < 0.35f * density) {
+                level.addParticle(ModRegistries.QUAKE_DUST.get(), true, true, fb.getX(), fb.getY() + 0.5, fb.getZ(),
+                        (RANDOM.nextDouble() - 0.5) * 0.04, 0.01, (RANDOM.nextDouble() - 0.5) * 0.04);
+            }
+        }
+        var it = st.falling.entrySet().iterator();
+        while (it.hasNext()) {
+            var e = it.next();
+            if (seen.contains(e.getKey())) continue;
+            it.remove();
+            Falling f = e.getValue();
+            if (cam.distanceToSqr(f.pos) > 128 * 128) continue;
+            if (frustum != null && !frustum.isVisible(new AABB(f.pos.x - 4, f.pos.y - 1, f.pos.z - 4, f.pos.x + 4, f.pos.y + 4, f.pos.z + 4))) continue;
+            // Masonry and soil make far more dust than wood. A collapse cloud billows up and rolls outward low and
+            // wide, then hangs in the air for several seconds (see QuakeDustParticle's collapse mode).
+            float dusty = f.state.getSoundType() == net.minecraft.world.level.block.SoundType.WOOD ? 0.5f : 1f;
+            int puffs = count((4 + RANDOM.nextInt(4)) * density * dusty);
+            for (int i = 0; i < puffs; i++) {
+                double a = RANDOM.nextDouble() * Math.PI * 2, sp = 0.05 + RANDOM.nextDouble() * 0.12;
+                level.addParticle(ModRegistries.COLLAPSE_DUST.get(), true, true, f.pos.x, f.pos.y + 0.3, f.pos.z,
+                        Math.cos(a) * sp, 0.02 + RANDOM.nextDouble() * 0.07, Math.sin(a) * sp);
+            }
+            int bits = count(6 * density);
+            for (int i = 0; i < bits; i++) {
+                level.addParticle(new BlockParticleOption(ParticleTypes.BLOCK, f.state), f.pos.x + (RANDOM.nextDouble() - 0.5),
+                        f.pos.y + 0.3, f.pos.z + (RANDOM.nextDouble() - 0.5),
+                        (RANDOM.nextDouble() - 0.5) * 0.3, 0.1 + RANDOM.nextDouble() * 0.25, (RANDOM.nextDouble() - 0.5) * 0.3);
+            }
+        }
+    }
+
+    /** Leaves shaken out of trees and water slopping about in ponds near the viewer. */
+    private static void shakeSurroundings(ClientLevel level, Vec3 cam, float local, float density) {
+        if (local < 0.15f) return;
+        int samples = count(40 * local * density);
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
+        for (int i = 0; i < samples; i++) {
+            m.set(cam.x + (RANDOM.nextDouble() - 0.5) * 32, cam.y + (RANDOM.nextDouble() - 0.4) * 16, cam.z + (RANDOM.nextDouble() - 0.5) * 32);
+            BlockState bs = level.getBlockState(m);
+            if (bs.is(BlockTags.LEAVES)) {
+                // Vanilla's own (per-leaf-type) falling-leaf particles, just much more often while the tree shakes.
+                for (int k = 0; k < 4; k++) bs.getBlock().animateTick(bs, level, m, RANDOM);
+            } else if (bs.getFluidState().isSource() && bs.getFluidState().is(net.minecraft.tags.FluidTags.WATER)
+                    && level.getBlockState(m.above()).isAir() && RANDOM.nextFloat() < local) {
+                for (int k = 0; k < 3; k++) {
+                    level.addParticle(ParticleTypes.SPLASH, m.getX() + RANDOM.nextDouble(), m.getY() + 0.95, m.getZ() + RANDOM.nextDouble(),
+                            (RANDOM.nextDouble() - 0.5) * 0.2, 0.1 + RANDOM.nextDouble() * 0.15 * local, (RANDOM.nextDouble() - 0.5) * 0.2);
+                }
+            }
+        }
+    }
+
+    private static BlockState groundAt(ClientLevel level, double x, double z) {
+        int ix = Mth.floor(x), iz = Mth.floor(z);
+        if (!level.hasChunk(ix >> 4, iz >> 4)) return null;
+        int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, ix, iz) - 1;
+        return level.getBlockState(new BlockPos(ix, y, iz));
+    }
+
+    private static boolean looseGround(BlockState bs) {
+        return bs.is(BlockTags.SAND) || bs.is(net.minecraft.world.level.block.Blocks.GRAVEL)
+                || bs.is(net.minecraft.world.level.block.Blocks.COARSE_DIRT) || bs.is(net.minecraft.world.level.block.Blocks.DIRT)
+                || bs.is(net.minecraft.world.level.block.Blocks.DIRT_PATH) || bs.is(BlockTags.TERRACOTTA)
+                || bs.is(net.minecraft.world.level.block.Blocks.SUSPICIOUS_GRAVEL) || bs.is(net.minecraft.world.level.block.Blocks.SUSPICIOUS_SAND);
     }
 
     private static void spawnDust(ClientLevel level, Frustum frustum, double x, double z, double up, double side) {

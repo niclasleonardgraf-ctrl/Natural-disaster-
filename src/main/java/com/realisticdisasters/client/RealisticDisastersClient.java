@@ -37,5 +37,6 @@ public class RealisticDisastersClient {
         event.registerSpriteSet(ModRegistries.RAIN_SHAFT.get(), s -> VortexParticle.provider(VortexParticle.Kind.RAIN, s));
         event.registerSpriteSet(ModRegistries.DUST_CLOUD.get(), s -> VortexParticle.provider(VortexParticle.Kind.DUST, s));
         event.registerSpriteSet(ModRegistries.QUAKE_DUST.get(), QuakeDustParticle::provider);
+        event.registerSpriteSet(ModRegistries.COLLAPSE_DUST.get(), QuakeDustParticle::collapseProvider);
     }
 }
