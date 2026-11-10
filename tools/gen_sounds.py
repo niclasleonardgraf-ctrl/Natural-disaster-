@@ -243,10 +243,49 @@ def gust(rng, seconds=3.0):
     return normalize(x * env, 0.75)
 
 
+# ---- wildfire: own copies of the original helpers so these sounds never change when shared helpers are retuned
+
+def _wf_fast_lowpass(x, cutoff):
+    """Vectorised FFT low-pass for long buffers."""
+    spec = np.fft.rfft(x)
+    freqs = np.fft.rfftfreq(len(x), 1 / RATE)
+    spec *= 1 / (1 + (freqs / cutoff) ** 4)
+    return np.fft.irfft(spec, len(x))
+
+
+def _wf_bandpass(x, lo, hi):
+    spec = np.fft.rfft(x)
+    freqs = np.fft.rfftfreq(len(x), 1 / RATE)
+    spec *= (1 / (1 + (lo / np.maximum(freqs, 1)) ** 4)) * (1 / (1 + (freqs / hi) ** 4))
+    return np.fft.irfft(spec, len(x))
+
+
+def _wf_smooth_noise(n, rate_hz, rng):
+    """Slow random modulation curve in 0..1."""
+    pts = max(4, int(n / RATE * rate_hz) + 2)
+    ctrl = rng.random(pts)
+    xs = np.linspace(0, pts - 1, n)
+    return np.interp(xs, np.arange(pts), ctrl)
+
+
+def _wf_loopable(x, fade=0.5):
+    """Crossfade the tail into the head so the buffer loops seamlessly."""
+    f = int(fade * RATE)
+    head, tail = x[:f].copy(), x[-f:].copy()
+    ramp = np.linspace(0, 1, f)
+    x = x[:-f].copy()
+    x[:f] = head * ramp + tail * (1 - ramp)
+    return x
+
+
+def _wf_normalize(x, peak=0.85):
+    return x / (np.max(np.abs(x)) + 1e-9) * peak
+
+
 def fire_crackle(rng, seconds=6.0):
     """Close wildfire layer: soft hiss bed with dense random crackles and snaps."""
     n = int(seconds * RATE)
-    bed = bandpass(rng.standard_normal(n), 300, 3000) * 0.12 * (0.6 + 0.4 * smooth_noise(n, 3, rng))
+    bed = _wf_bandpass(rng.standard_normal(n), 300, 3000) * 0.12 * (0.6 + 0.4 * _wf_smooth_noise(n, 3, rng))
     clicks = np.zeros(n)
     count = int(seconds * 55)
     for _ in range(count):
@@ -255,42 +294,42 @@ def fire_crackle(rng, seconds=6.0):
         amp = rng.random() ** 2.5
         burst = rng.standard_normal(length) * np.exp(-np.linspace(0, rng.uniform(4, 12), length))
         clicks[at:at + length] += burst * amp
-    clicks = bandpass(clicks, 700, 9000)
+    clicks = _wf_bandpass(clicks, 700, 9000)
     x = bed + clicks * 0.9
-    return normalize(loopable(x, 0.3), 0.8)
+    return _wf_normalize(_wf_loopable(x, 0.3), 0.8)
 
 
 def fire_roar(rng, seconds=8.0):
     """Mid layer: the deep, fluttering roar of a large flame front."""
     n = int(seconds * RATE)
-    low = fast_lowpass(rng.standard_normal(n), 260)
-    body = bandpass(rng.standard_normal(n), 200, 1100) * 0.4
+    low = _wf_fast_lowpass(rng.standard_normal(n), 260)
+    body = _wf_bandpass(rng.standard_normal(n), 200, 1100) * 0.4
     t = np.arange(n) / RATE
-    flutter = 0.75 + 0.25 * np.sin(2 * np.pi * (9 + 3 * smooth_noise(n, 0.7, rng)) * t)  # flame flicker
-    surge = 0.6 + 0.4 * smooth_noise(n, 0.6, rng)
+    flutter = 0.75 + 0.25 * np.sin(2 * np.pi * (9 + 3 * _wf_smooth_noise(n, 0.7, rng)) * t)  # flame flicker
+    surge = 0.6 + 0.4 * _wf_smooth_noise(n, 0.6, rng)
     x = (low * 1.4 + body * flutter) * surge
-    return normalize(loopable(x), 0.85)
+    return _wf_normalize(_wf_loopable(x), 0.85)
 
 
 def fire_distant(rng, seconds=10.0):
     """Far layer: a wide, muffled whoosh-rumble with slow surges."""
     n = int(seconds * RATE)
     brown = np.cumsum(rng.standard_normal(n))
-    brown -= fast_lowpass(brown, 6)
-    x = fast_lowpass(brown, 180) + fast_lowpass(rng.standard_normal(n), 500) * 0.15
-    x *= 0.65 + 0.35 * smooth_noise(n, 0.4, rng)
-    return normalize(loopable(x), 0.9)
+    brown -= _wf_fast_lowpass(brown, 6)
+    x = _wf_fast_lowpass(brown, 180) + _wf_fast_lowpass(rng.standard_normal(n), 500) * 0.15
+    x *= 0.65 + 0.35 * _wf_smooth_noise(n, 0.4, rng)
+    return _wf_normalize(_wf_loopable(x), 0.9)
 
 
 def fire_pop(rng, seconds=1.2):
     """One-shot: a burning branch snapping (sharp crack + short woody thump + sizzle)."""
     n = int(seconds * RATE)
     t = np.linspace(0, seconds, n)
-    crack = bandpass(rng.standard_normal(n), 1200, 9000) * np.exp(-t * 60)
-    thump = fast_lowpass(rng.standard_normal(n), 300) * np.exp(-t * 18) * 0.8
-    sizzle = bandpass(rng.standard_normal(n), 2500, 8000) * np.exp(-t * 4) * 0.08
+    crack = _wf_bandpass(rng.standard_normal(n), 1200, 9000) * np.exp(-t * 60)
+    thump = _wf_fast_lowpass(rng.standard_normal(n), 300) * np.exp(-t * 18) * 0.8
+    sizzle = _wf_bandpass(rng.standard_normal(n), 2500, 8000) * np.exp(-t * 4) * 0.08
     x = crack + thump + sizzle
-    return normalize(x, 0.9)
+    return _wf_normalize(x, 0.9)
 
 
 def main():

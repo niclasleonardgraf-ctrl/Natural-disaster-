@@ -145,7 +145,7 @@ burns, a boreal forest after fire):
   away or is scorched, and a pig flees or catches fire
 - `wildfire_respects_block_toggle`: with `blockDestruction=false` the fire still runs (visuals, entity damage) but no block changes
 - `wildfire_intensity3_tick_cost`: on a 48x48 field (~1000 columns burnt in 15 s) the cost stays below 2 ms/tick
-  (measured 0.55–0.9 ms)
+  (measured 0.3–0.9 ms)
 
 ## Configuration
 
