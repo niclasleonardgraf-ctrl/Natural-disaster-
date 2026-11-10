@@ -18,6 +18,8 @@ Full design spec: [`docs/SPEC.md`](docs/SPEC.md).
 | Earthquake, Wildfire, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
 | Meteor shower | ✅ complete |
 | Earthquake, Wildfire, Volcano, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
+| Tsunami/flood | ✅ complete |
+| Earthquake, Wildfire, Volcano, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
 
 ## Commands (op level 2)
 
@@ -311,6 +313,58 @@ compared with reference photos. Everything is built to sit seamlessly in Minecra
    thins out to about a diameter away, burnt turf, crushed rock (cobble/gravel/tuff, or coarse dirt in soil) lining
    the bowl, a dark melt patch on the floor and a small meteorite at the bottom with a chance of rare ores.
 5. To see a solid ore core, set `oreChance = 1.0` in the `meteor_shower` config section.
+## Testing a tsunami in-game
+
+1. `./gradlew runClient`, create a world with cheats on and stand on a beach facing the sea (any coast works; the
+   tsunami snaps its landfall to the nearest shoreline within ~90 blocks and faces the open water by itself).
+2. `/disaster start tsunami 3` (or give a position on the beach: `/disaster start tsunami 3 ~ ~ ~`).
+3. Phases: **warning** (~30 s: the sea draws back 18-34 blocks and exposes the seabed, fish are left flopping on
+   it, a foam line follows the retreating water, distant booms, animals run inland, villagers hide; the weather stays
+   as it is), **buildup** (~10 s: a white line appears on the horizon and grows into a turbulent bore of churning white
+   water over a dark face, refilling the drawn-back sea), **peak** (35-60 s: the bore runs inland, turning
+   brown with sediment, shoving entities, exploding into spray against walls and trees, tearing out plants and, at
+   intensity 3+, wooden structures; the flood keeps rising after the front passes and a second surge rolls in over it),
+   **aftermath** (~25-40 s: the water drains top-down and the backwash drags debris out to sea).
+4. Afterwards the land is dry again, but the plants are gone, the turf near the shore is scoured to sand, gravel and
+   coarse dirt, and the dropped debris lies where the water left it. Pre-existing water (sea, ponds, rivers) is untouched.
+5. Started away from any coast it becomes an inland flash flood rolling in from a random direction.
+
+### What the tsunami looks like (and what it was compared against)
+Modelled on documented observations of real events (2004 Indian Ocean, 2011 Tohoku, 2025 Kamchatka; NOAA/USGS
+descriptions): a tsunami is usually **not** a towering curling wave but a fast-rising, churning flood or bore of white
+water, "a tide that forgot to stop", that keeps rising for minutes and comes as several surges. Near the shore the
+water is turbulent white and grey-green; inland it turns dark, brown and debris-laden. So: soft 64x64 translucent
+whitewater, spray and droplet textures plus floating-debris sprites (`tools/gen_textures.py`), a muddy tint on flood
+water (a small client mixin on `BiomeColors.getAverageWaterColor`, only inside an active flood zone above sea level),
+spray bursts where the bore hits solid blocks, and no storm sky.
+
+The bore itself is **drawn as water, not particles** (`client/tsunami/WaveRenderer`): one continuous surface with the
+same shader, texel density and tint as the water blocks around it. It grows out of the real flood water behind it,
+pitches into a steep breaking face and meets the sea or ground ahead, so the wave, the sea and the flood read as one
+body. Its layers are vanilla `water_still` where it joins calm water, an animated turbulent `tsunami_water` body and
+animated `tsunami_foam` white water on the lip and face (64x64 textures covering 4x4 blocks, so the pattern doesn't
+repeat every block). The crest, lip and leading edge churn along the coast as it moves.
+
+### Tsunami physics
+- **Flow field.** The water has a depth-averaged current everywhere in the flood zone: the bore drives water inland
+  at about its own speed (slowing behind it), high water goes slack, the second surge pushes again, and the backwash
+  pours back to sea, fastest early and near the shore. During the drawback the water near the beach flows seaward.
+- **Drag.** Anything in the water is pulled toward that current (F = k * (u - v)): items and boats are swept along,
+  mobs struggle, players can wade slack water but not the surge or backwash. The bore itself lifts, shoves and hurts.
+- **Hydrodynamic loading.** The flow's force scales with depth x velocity^2, strongest where the bore first hits and
+  fading inland. Blocks resist by material: plants and leaves fail first, then glass, wool, doors, fences, planks and
+  logs at higher intensity; stone, brick, concrete, metal and soil hold. Walls in the water column take the full
+  bore; water that rises later only pushes gently.
+- **Trees** in the run-up zone are uprooted whole when the force beats their anchoring.
+- **Floating wreckage.** Timber and foliage torn loose become tumbling block displays that ride the water surface
+  half-submerged, are carried inland and dragged back out by the backwash, knock against walls, and settle as real
+  blocks where the water leaves them: permanent debris fields. Pieces still afloat at sea at the end are lost.
+- **Behaviour.** Animals run for the highest ground nearby; villagers shelter.
+
+### Cinematic touches
+Landfall erupts as a white spray curtain along the whole coast with a deep boom and a camera jolt felt inland; the
+bore reaching you hits hard (shake + FOV punch); under flood water the view closes to a few blocks of brown murk with
+silt and bubbles drifting by; a restrained grade (cooler sky, slightly darker land) builds as the wave closes in.
 
 ## Automated tests
 
@@ -354,6 +408,13 @@ Volcano tests confine the volcano to an 18-block radius (`confineForTest`) becau
 Tests start from a clean slate (leftover disasters stopped, block queue cleared), move the GameTest world spawn away
 from the arena (vanilla spawn protection would otherwise protect part of it via the claim check), and only write
 config values that differ.
+- `tsunami_floods_and_recedes` (own `tsunami_arena` with a walled sea, beach, plants and a pond): the sea draws back,
+  the land floods, then every flood block is gone, every original sea/pond block is still water, a pig was pushed/fled
+  inland, and the plant damage and erosion stay
+- `tsunami_respects_block_toggle`: with `blockDestruction=false` the tsunami changes no blocks
+- `tsunami_intensity3_tick_cost`: below 2 ms/tick while the wave floods (measured ~0.3-0.6 ms with ~8,600 water blocks)
+- `tsunami_forces_and_debris`: an intensity-5 bore against a stone-brick sea wall (holds), a wooden hut (fails and
+  floats off as wreckage), glass panes (shatter) and a tree (uprooted)
 
 ## Configuration
 
@@ -372,6 +433,8 @@ config values that differ.
   The meteor_shower section (default biomes: `#minecraft:is_overworld`, i.e. anywhere in the overworld) has duration
   scale, impact rate, crater scale, ore chance, the ore list (`"block_id"` or `"block_id*weight"`), rim fires on/off,
   max flying ejecta per impact, and blast damage (glass/leaves/plants) on/off.
+  The tsunami section has a duration scale (all phases) and a cap on flood water blocks per tsunami (default 12,000).
+  Natural tsunamis spawn in beach, stony shore, mangrove and (non-deep) ocean biomes.
 - `config/realisticdisasters-client.toml`: camera shake on/off and strength, FOV pulse, particle density, fog, sky tint.
   Also editable in-game: Mods → Realistic Natural Disasters → Config.
 
@@ -393,6 +456,7 @@ common (server-safe)
   disaster/volcano/LavaBombEntity   projectile, rendered as a full-bright magma block
   disaster/meteor/MeteorShowerDisaster   impacts scheduled ahead + synced in a ring buffer; blast physics; ballistic ejecta
   disaster/meteor/Crater, BlastDamage     crater carving per column; glass / leaves / plants around the impact
+  disaster/tsunami/TsunamiDisaster   drawback, wave front, tracked flood water, recession, pushes, mob flight
   network/                   DisasterSyncPayload (every 4 ticks), DisasterRemovePayload
   command/DisasterCommand, config/, registry/ModRegistries (sounds, particles, damage type key)
 client (Dist.CLIENT only)
@@ -408,6 +472,9 @@ mixin/CameraMixin            lets the earthquake offset the camera position
                              own pipelines + shader with vanilla fog); SparkParticle lava spatter; AshParticle ash flakes
   DisasterVisual(s)          per-type particles + sounds (tornado/TornadoVisual, meteor/MeteorShowerVisual)
   meteor/MeteorParticle      self-lit trail / fireball / ember particles; MeteorFlashOverlay (GUI layer)
+  DisasterVisual(s)          per-type particles + sounds (tornado/TornadoVisual, tsunami/TsunamiVisual)
+  tsunami/WaveParticle       bore white water, spray droplets, mist and floating debris that travel with the flow
+  tsunami/FloodTint          muddy flood-water colour (read by mixin/WaterTintMixin)
   particle/VortexParticle    funnel / debris / dust particles that orbit their disaster
   particle/WildfireParticle  smoke, convection billows, smoke layer, smoulder wisps, flame tongues, embers, ash
   sound/DisasterLoopSound    cross-fading positional (near) and non-attenuated (far) loops
@@ -491,6 +558,17 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
 - **Volcano cone** is decided once the vent area is loaded: it's built only where the ground within its radius varies by
   at most 3 blocks. On rough or mountain ground the eruption comes out of a magma vent in the existing terrain.
 
+- **Tsunami water is static.** Flood water is placed and removed through the block-change queue with flags that skip
+  neighbour updates and `onPlace`, and while flood water exists the pending fluid ticks above sea level inside the
+  flood box are dropped every 2 ticks. So the flood never spreads beyond what was placed, and the recession can't be
+  refilled by the infinite-source rule (vanilla grass dying under the water would otherwise trigger that). Side
+  effect: pre-existing water/lava above sea level inside the flood box doesn't flow during the event.
+- **Tsunami bookkeeping:** every placed block is tracked and only those are removed; cells that were dry before the
+  flood (flooded cells and their side neighbours) are swept once more afterwards to catch any stray flow. Water that was
+  there before is never removed. The sea's drawback is tracked the same way and restored as the wave passes.
+- **Tsunami geometry:** the landfall snaps to the nearest shoreline and the wave comes from the direction with the most
+  open water (averaged over 16 directions). A landfall in open ocean with no shore in range only shows the wave.
+
 ## Known issues
 
 - Sound has not been heard-tested: the build container has no audio device. The sound files and their playback code
@@ -547,3 +625,13 @@ Assets are generated by `tools/gen_textures.py`, `tools/gen_sounds.py` (needs nu
   short server-cost bump while it happens (the intensity-3 average stays well under 1 ms/tick).
   Ejecta landing spots are taken from where the falling block stops; one that lands in a protected area or on a
   non-sturdy block simply vanishes (no item drop).
+- Tsunami: if the server stops mid-tsunami (disasters aren't saved), the flood water or the sea's drawback at that
+  moment stays in the world. `/disaster stop` and `/disaster stop <id> now` both clean up properly.
+- Tsunami: replacing the lower half of a two-block plant with water can leave its upper half floating above the flood
+  line (block updates are suppressed to keep the water static).
+- Tsunami: floating wreckage uses block-display entities (tagged `realisticdisasters_debris`). If the server stops
+  mid-tsunami they stay where they are; `/kill @e[tag=realisticdisasters_debris]` removes them.
+- Tsunami: the drawn bore is a surface, not volume: from inside it you see its layers from below (the flood water
+  around you is real, murky water blocks).
+- Tsunami: the muddy flood tint applies to any water re-meshed inside the flood zone while the tsunami is active
+  (e.g. a pond whose chunk section updates); it returns to normal the next time that section is re-meshed.

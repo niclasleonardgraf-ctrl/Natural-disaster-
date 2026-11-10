@@ -19,7 +19,6 @@ DUST = [(232, 228, 220), (206, 201, 192), (176, 170, 160), (144, 138, 128)]  # n
 DEBRIS = [(118, 86, 54), (92, 66, 40), (86, 120, 52), (64, 92, 38), (128, 128, 128), (98, 98, 98)]
 BLOCKS = os.path.join(ROOT, "assets", "realisticdisasters", "textures", "block")
 
-
 def blob(size, rng, lobes, fill=1.0):
     """Union of a few circles -> boolean mask plus a per-pixel 'height' for shading."""
     circles = []
@@ -748,6 +747,120 @@ def smoke_texture(seed, size=64):
             shade = int(255 * (0.82 + 0.18 * (1 - y / size)) * (0.9 + 0.1 * n2[y][x]))
             img.putpixel((x, y), (shade, shade, shade, int(a * 235)))
     return img
+def whitewater(seed, size=64):
+    """Turbulent white water: a dense, billowing foam mass with darker churned veins and a ragged, soft edge.
+    Greyscale; tinted in code (white-grey at sea, brown-grey once it carries sediment inland)."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    n = fbm(size, rng, octaves=6, base=3)
+    veins = np.abs(fbm(size, rng, octaves=5, base=5) - 0.5) * 2      # ridged noise -> churn lines
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    r = np.sqrt(x * x + y * y) + (n - 0.5) * 0.8
+    t = np.clip((0.95 - r) / 0.2, 0, 1)                                # crisper, more liquid edge
+    a = np.clip(t * t * (3 - 2 * t) * (0.9 + 0.4 * n), 0, 1)
+    billow = fbm(size, rng, octaves=4, base=4)                         # bright foam lumps, shaded undersides
+    light = (0.8 + 0.15 * (-y * 0.5 + 0.5) + 0.3 * (billow - 0.5) + 0.12 * (n - 0.5)
+             - 0.1 * np.clip(0.25 - veins, 0, 1) / 0.25)
+    rgb = (np.clip(light, 0, 1) * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
+
+
+def droplets(seed, size=32):
+    """Spray droplets: a loose cluster of small soft dots of varying size."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    a = np.zeros((size, size))
+    yy, xx = np.mgrid[0:size, 0:size]
+    for _ in range(rng.integers(7, 13)):
+        cx, cy = rng.normal(size / 2, size / 6, 2)
+        rad = rng.uniform(0.8, 2.6)
+        d = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / rad
+        a = np.maximum(a, np.clip(1.2 - d, 0, 1))
+    light = np.full((size, size), 235, dtype="uint8")
+    return Image.fromarray(np.dstack([light, light, light, (np.clip(a, 0, 1) * 255).astype("uint8")]), "RGBA")
+
+
+def flood_debris(seed, size=32):
+    """Floating debris: splintered wood, a leafy twig or a dark clump of mud and plants (coloured, not tinted)."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:size, 0:size].astype(float)
+    a = np.zeros((size, size))
+    col = np.zeros((size, size, 3))
+    kinds = [((112, 82, 52), (84, 60, 38)), ((70, 92, 44), (52, 70, 34)), ((74, 62, 48), (52, 44, 34))]
+    for _ in range(rng.integers(2, 5)):
+        light, dark = kinds[rng.integers(0, 3)]
+        cx, cy = rng.uniform(size * 0.3, size * 0.7, 2)
+        ang = rng.uniform(0, np.pi)
+        length, width = rng.uniform(4, 11), rng.uniform(1.0, 2.6)
+        u = (xx - cx) * np.cos(ang) + (yy - cy) * np.sin(ang)
+        v = -(xx - cx) * np.sin(ang) + (yy - cy) * np.cos(ang)
+        d = np.maximum(np.abs(u) / length, np.abs(v) / width)
+        m = np.clip((1.0 - d) * 3, 0, 1)
+        grain = 0.5 + 0.5 * np.sin(v * 0.9 + u * 0.15 + rng.uniform(0, 6))
+        c = np.array(dark)[None, None, :] + (np.array(light) - np.array(dark))[None, None, :] * grain[:, :, None]
+        col = np.where(m[:, :, None] > a[:, :, None], c, col)
+        a = np.maximum(a, m)
+    return Image.fromarray(np.dstack([col.astype("uint8"), (a * 255).astype("uint8")]), "RGBA")
+
+
+def periodic_field(rng, size, frames, waves, kmax, aniso=1.0, cycles=(1, 2)):
+    """Tileable (in x, y and time) noise: sum of plane waves with integer wave numbers. Returns [frames, size, size]."""
+    import numpy as np
+    y, x = np.mgrid[0:size, 0:size] / size
+    out = np.zeros((frames, size, size))
+    for _ in range(waves):
+        kx, ky = 0, 0
+        while kx == 0 and ky == 0:
+            kx, ky = rng.integers(-kmax, kmax + 1), rng.integers(-int(kmax * aniso), int(kmax * aniso) + 1)
+        amp = 1.0 / (kx * kx + ky * ky) ** 0.5
+        phase = rng.uniform(0, 2 * np.pi)
+        w = rng.integers(cycles[0], cycles[1] + 1) * rng.choice([-1, 1])
+        for f in range(frames):
+            out[f] += amp * np.sin(2 * np.pi * (kx * x + ky * y) + phase + 2 * np.pi * w * f / frames)
+    lo, hi = out.min(), out.max()
+    return (out - lo) / (hi - lo)
+
+
+def tsunami_block_textures(frames=32):
+    """Animated 16x16 block textures for the wave surface, at vanilla water's texel density so the wave and the
+    water blocks read as one body. Greyscale (tinted in code like vanilla water). Frames scroll down the face, as the
+    water tumbles forward."""
+    import numpy as np
+    rng = np.random.default_rng(4242)
+    size = 64  # one frame covers 4x4 blocks at 16 px per block, so the pattern doesn't repeat every block
+    out = os.path.join(ROOT, "assets", "realisticdisasters", "textures", "block")
+    os.makedirs(out, exist_ok=True)
+
+    # Turbulent water: vanilla-like grey with stronger, streaky churn; more opaque than calm water (silt and air).
+    churn = periodic_field(rng, size, frames, 40, 10, aniso=1.6)
+    streak = periodic_field(rng, size, frames, 24, 14, aniso=2.5)
+    water = np.zeros((size * frames, size, 4), dtype=np.uint8)
+    for f in range(frames):
+        shift = (f * size) // frames                    # one full tile of downward motion per loop
+        c = np.roll(churn[f], shift, axis=0)
+        st = np.roll(streak[f], shift, axis=0)
+        luma = 128 + 70 * c + 35 * (st - 0.5)
+        water[f * size:(f + 1) * size, :, 0:3] = np.clip(luma, 0, 255)[:, :, None]
+        water[f * size:(f + 1) * size, :, 3] = 226
+    Image.fromarray(water, "RGBA").save(os.path.join(out, "tsunami_water.png"))
+
+    # White water: dense aerated foam with lacy gaps and grey shading between the bubbles.
+    body = periodic_field(rng, size, frames, 40, 7)
+    fine = periodic_field(rng, size, frames, 48, 18)
+    foam = np.zeros((size * frames, size, 4), dtype=np.uint8)
+    for f in range(frames):
+        shift = (2 * f * size) // frames
+        b = np.roll(body[f], shift, axis=0)
+        fi = np.roll(fine[f], shift, axis=0)
+        luma = 196 + 59 * fi - 30 * (1 - b)
+        alpha = np.clip((0.35 + 0.9 * b + 0.25 * (fi - 0.5)) * 255, 60, 255)
+        foam[f * size:(f + 1) * size, :, 0:3] = np.clip(luma, 0, 255)[:, :, None]
+        foam[f * size:(f + 1) * size, :, 3] = alpha
+    Image.fromarray(foam, "RGBA").save(os.path.join(out, "tsunami_foam.png"))
+    for name in ("tsunami_water", "tsunami_foam"):
+        with open(os.path.join(out, name + ".png.mcmeta"), "w") as fh:
+            fh.write('{\n  "animation": {\n    "frametime": 2\n  }\n}\n')
 
 
 def write(img, name):
@@ -784,11 +897,17 @@ def main():
     write_entity_texture(funnel_core_texture(1000), "funnel_core")
     write_entity_texture(funnel_veil_texture(1001), "funnel_veil")
     write_entity_texture(debris_sheath_texture(1002), "debris_sheath")
+        write(whitewater(700 + i), f"wave_water_{i}")
+        write(soft_cloud(800 + i, density=0.7, wispy=True), f"sea_spray_{i}")
+        write(droplets(900 + i), f"wave_foam_{i}")
+        write(flood_debris(1000 + i), f"flood_debris_{i}")
 
     # Realistic rain (overrides vanilla's blue rain texture; applies to all rain in the game).
     env = os.path.join(ROOT, "assets", "minecraft", "textures", "environment")
     os.makedirs(env, exist_ok=True)
     realistic_rain(900).save(os.path.join(env, "rain.png"))
+
+    tsunami_block_textures()
 
     # 16x16 mod icon (tornado silhouette on a storm sky), upscaled with nearest neighbour for the mod list.
     icon = Image.new("RGBA", (16, 16), (78, 91, 71, 255))

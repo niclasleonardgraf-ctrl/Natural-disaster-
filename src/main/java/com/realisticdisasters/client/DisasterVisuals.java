@@ -8,6 +8,7 @@ import com.realisticdisasters.client.earthquake.EarthquakeVisual;
 import com.realisticdisasters.client.wildfire.WildfireVisual;
 import com.realisticdisasters.client.volcano.VolcanoVisual;
 import com.realisticdisasters.client.meteor.MeteorShowerVisual;
+import com.realisticdisasters.client.tsunami.TsunamiVisual;
 import com.realisticdisasters.disaster.DisasterType;
 import net.minecraft.client.Camera;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -31,6 +32,7 @@ public final class DisasterVisuals {
         VISUALS.put(DisasterType.WILDFIRE, new WildfireVisual());
         VISUALS.put(DisasterType.VOLCANO, new VolcanoVisual());
         VISUALS.put(DisasterType.METEOR_SHOWER, new MeteorShowerVisual());
+        VISUALS.put(DisasterType.TSUNAMI, new TsunamiVisual());
     }
 
     public static DisasterVisual get(DisasterType type) {

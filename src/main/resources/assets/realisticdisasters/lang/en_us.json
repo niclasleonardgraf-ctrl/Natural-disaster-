@@ -84,5 +84,14 @@
   "subtitles.realisticdisasters.meteor.whoosh_distant": "Distant meteor whooshes",
   "subtitles.realisticdisasters.meteor.impact": "Meteor impacts",
   "subtitles.realisticdisasters.meteor.impact_distant": "Distant meteor impact",
-  "realisticdisasters.configuration.meteor_shower": "Meteor shower"
+  "realisticdisasters.configuration.meteor_shower": "Meteor shower",
+  "disaster.realisticdisasters.tsunami": "Tsunami",
+  "disaster.realisticdisasters.tsunami.warning": "The sea is pulling back from the shore... get to high ground!",
+  "disaster.realisticdisasters.tsunami.wave": "A wall of water is racing toward the coast!",
+  "death.attack.realisticdisasters.tsunami": "%1$s was swallowed by a tsunami",
+  "death.attack.realisticdisasters.tsunami.player": "%1$s was swallowed by a tsunami while fighting %2$s",
+  "subtitles.realisticdisasters.tsunami.roar": "Tsunami roars",
+  "subtitles.realisticdisasters.tsunami.surf": "Heavy surf",
+  "subtitles.realisticdisasters.tsunami.crash": "Wave crashes",
+  "realisticdisasters.configuration.tsunami": "Tsunami / flood"
 }

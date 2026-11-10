@@ -14,6 +14,7 @@ import net.minecraft.core.Holder;
 import net.minecraft.world.level.biome.Biome;
 import com.realisticdisasters.disaster.volcano.VolcanoDisaster;
 import com.realisticdisasters.disaster.meteor.MeteorShowerDisaster;
+import com.realisticdisasters.disaster.tsunami.TsunamiDisaster;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
 
@@ -30,7 +31,9 @@ public enum DisasterType {
     VOLCANO(VolcanoDisaster::new, DisasterConfig.VOLCANO_ENABLED::getAsBoolean,
             DisasterConfig.VOLCANO_WEIGHT::getAsInt, DisasterConfig.VOLCANO_BIOMES::get),
     METEOR_SHOWER(MeteorShowerDisaster::new, DisasterConfig.METEOR_ENABLED::getAsBoolean,
-            DisasterConfig.METEOR_WEIGHT::getAsInt, DisasterConfig.METEOR_BIOMES::get);
+            DisasterConfig.METEOR_WEIGHT::getAsInt, DisasterConfig.METEOR_BIOMES::get),
+    TSUNAMI(TsunamiDisaster::new, DisasterConfig.TSUNAMI_ENABLED::getAsBoolean,
+            DisasterConfig.TSUNAMI_WEIGHT::getAsInt, DisasterConfig.TSUNAMI_BIOMES::get);
 
     public interface Factory {
         Disaster create(ServerLevel level, int id, Vec3 pos, int intensity);

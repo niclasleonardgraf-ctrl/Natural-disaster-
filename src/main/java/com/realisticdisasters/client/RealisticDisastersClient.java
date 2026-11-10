@@ -14,6 +14,7 @@ import com.realisticdisasters.disaster.volcano.LavaBombEntity;
 import net.minecraft.client.renderer.entity.ThrownItemRenderer;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import com.realisticdisasters.client.meteor.MeteorParticle;
+import com.realisticdisasters.client.tsunami.WaveParticle;
 import com.realisticdisasters.network.DisasterRemovePayload;
 import com.realisticdisasters.network.DisasterSyncPayload;
 import com.realisticdisasters.registry.ModRegistries;
@@ -74,6 +75,10 @@ public class RealisticDisastersClient {
         event.registerSpriteSet(ModRegistries.METEOR_FIREBALL.get(), s -> MeteorParticle.provider(MeteorParticle.Kind.FIREBALL, s));
         event.registerSpriteSet(ModRegistries.METEOR_EMBER.get(), s -> MeteorParticle.provider(MeteorParticle.Kind.EMBER, s));
         event.registerSpriteSet(ModRegistries.METEOR_SMOKE.get(), s -> MeteorParticle.provider(MeteorParticle.Kind.SMOKE, s));
+        event.registerSpriteSet(ModRegistries.WAVE_WATER.get(), s -> WaveParticle.provider(WaveParticle.Kind.WATER, s));
+        event.registerSpriteSet(ModRegistries.WAVE_FOAM.get(), s -> WaveParticle.provider(WaveParticle.Kind.FOAM, s));
+        event.registerSpriteSet(ModRegistries.SEA_SPRAY.get(), s -> WaveParticle.provider(WaveParticle.Kind.MIST, s));
+        event.registerSpriteSet(ModRegistries.FLOOD_DEBRIS.get(), s -> WaveParticle.provider(WaveParticle.Kind.DEBRIS, s));
     }
 
     private static void registerEntityRenderers(EntityRenderersEvent.RegisterRenderers event) {

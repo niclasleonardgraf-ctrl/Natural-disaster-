@@ -76,6 +76,12 @@ public final class DisasterConfig {
     public static final ModConfigSpec.BooleanValue METEOR_STARTS_FIRES;
     public static final ModConfigSpec.IntValue METEOR_MAX_EJECTA;
     public static final ModConfigSpec.BooleanValue METEOR_BLAST_DAMAGE;
+    // ---- tsunami ----
+    public static final ModConfigSpec.BooleanValue TSUNAMI_ENABLED;
+    public static final ModConfigSpec.IntValue TSUNAMI_WEIGHT;
+    public static final ModConfigSpec.DoubleValue TSUNAMI_DURATION_SCALE;
+    public static final ModConfigSpec.IntValue TSUNAMI_MAX_WATER_BLOCKS;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> TSUNAMI_BIOMES;
 
     static {
         B.push("general");
@@ -218,6 +224,19 @@ public final class DisasterConfig {
                 .defineInRange("maxEjecta", 40, 0, 200);
         METEOR_BLAST_DAMAGE = B.comment("The blast shatters glass, strips leaves and flattens plants around impacts (only if block destruction is on).")
                 .define("blastDamage", true);
+        B.push("tsunami");
+        TSUNAMI_ENABLED = B.define("enabled", true);
+        TSUNAMI_WEIGHT = B.comment("Relative weight when picking a natural disaster.")
+                .defineInRange("weight", 8, 0, 1000);
+        TSUNAMI_DURATION_SCALE = B.comment("Multiplier for every tsunami phase (drawback, approach, flood, recession).")
+                .defineInRange("durationScale", 1.0, 0.1, 10.0);
+        TSUNAMI_MAX_WATER_BLOCKS = B.comment("Max flood water blocks one tsunami may place (all are removed again when it recedes).")
+                .defineInRange("maxWaterBlocks", 12000, 0, 100_000);
+        TSUNAMI_BIOMES = B.comment("Biomes (ids or #tags) where tsunamis can form naturally. The landfall snaps to the nearest shoreline.")
+                .defineListAllowEmpty("biomes", List.of(
+                        "minecraft:beach", "minecraft:snowy_beach", "minecraft:stony_shore", "minecraft:mangrove_swamp",
+                        "minecraft:ocean", "minecraft:warm_ocean", "minecraft:lukewarm_ocean", "minecraft:cold_ocean"),
+                        () -> "minecraft:beach", o -> o instanceof String);
         B.pop();
     }
 
