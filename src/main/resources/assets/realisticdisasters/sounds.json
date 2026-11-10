@@ -153,5 +153,70 @@
         "attenuation_distance": 64
       }
     ]
+  },
+  "disaster.wildfire.crackle": {
+    "subtitle": "subtitles.realisticdisasters.wildfire.crackle",
+    "sounds": [
+      {
+        "name": "realisticdisasters:wildfire_crackle",
+        "stream": true,
+        "attenuation_distance": 40
+      }
+    ]
+  },
+  "disaster.wildfire.roar": {
+    "subtitle": "subtitles.realisticdisasters.wildfire.roar",
+    "sounds": [
+      {
+        "name": "realisticdisasters:wildfire_roar",
+        "stream": true,
+        "attenuation_distance": 110
+      }
+    ]
+  },
+  "disaster.wildfire.distant": {
+    "subtitle": "subtitles.realisticdisasters.wildfire.distant",
+    "sounds": [
+      {
+        "name": "realisticdisasters:wildfire_distant",
+        "stream": true
+      }
+    ]
+  },
+  "disaster.wildfire.pop": {
+    "subtitle": "subtitles.realisticdisasters.wildfire.pop",
+    "sounds": [
+      {
+        "name": "realisticdisasters:wildfire_pop1",
+        "attenuation_distance": 32
+      },
+      {
+        "name": "realisticdisasters:wildfire_pop2",
+        "attenuation_distance": 32
+      },
+      {
+        "name": "realisticdisasters:wildfire_pop3",
+        "attenuation_distance": 32
+      }
+    ]
+  },
+  "disaster.wildfire.whoosh": {
+    "subtitle": "subtitles.realisticdisasters.wildfire.whoosh",
+    "sounds": [
+      {
+        "name": "realisticdisasters:wildfire_whoosh",
+        "attenuation_distance": 96
+      }
+    ]
+  },
+  "disaster.wildfire.whirl": {
+    "subtitle": "subtitles.realisticdisasters.wildfire.whirl",
+    "sounds": [
+      {
+        "name": "realisticdisasters:wildfire_whirl",
+        "stream": true,
+        "attenuation_distance": 96
+      }
+    ]
   }
 }

@@ -329,6 +329,122 @@ def earthquake_sounds():
     write_ogg("quake_distant", quake_distant(rng))
     for i in range(1, 4):
         write_ogg(f"quake_crack{i}", quake_crack(rng))
+# ---- wildfire: own copies of the original helpers so these sounds never change when shared helpers are retuned
+
+def _wf_fast_lowpass(x, cutoff):
+    """Vectorised FFT low-pass for long buffers."""
+    spec = np.fft.rfft(x)
+    freqs = np.fft.rfftfreq(len(x), 1 / RATE)
+    spec *= 1 / (1 + (freqs / cutoff) ** 4)
+    return np.fft.irfft(spec, len(x))
+
+
+def _wf_bandpass(x, lo, hi):
+    spec = np.fft.rfft(x)
+    freqs = np.fft.rfftfreq(len(x), 1 / RATE)
+    spec *= (1 / (1 + (lo / np.maximum(freqs, 1)) ** 4)) * (1 / (1 + (freqs / hi) ** 4))
+    return np.fft.irfft(spec, len(x))
+
+
+def _wf_smooth_noise(n, rate_hz, rng):
+    """Slow random modulation curve in 0..1."""
+    pts = max(4, int(n / RATE * rate_hz) + 2)
+    ctrl = rng.random(pts)
+    xs = np.linspace(0, pts - 1, n)
+    return np.interp(xs, np.arange(pts), ctrl)
+
+
+def _wf_loopable(x, fade=0.5):
+    """Crossfade the tail into the head so the buffer loops seamlessly."""
+    f = int(fade * RATE)
+    head, tail = x[:f].copy(), x[-f:].copy()
+    ramp = np.linspace(0, 1, f)
+    x = x[:-f].copy()
+    x[:f] = head * ramp + tail * (1 - ramp)
+    return x
+
+
+def _wf_normalize(x, peak=0.85):
+    return x / (np.max(np.abs(x)) + 1e-9) * peak
+
+
+def fire_crackle(rng, seconds=6.0):
+    """Close wildfire layer: soft hiss bed with dense random crackles and snaps."""
+    n = int(seconds * RATE)
+    bed = _wf_bandpass(rng.standard_normal(n), 300, 3000) * 0.12 * (0.6 + 0.4 * _wf_smooth_noise(n, 3, rng))
+    clicks = np.zeros(n)
+    count = int(seconds * 55)
+    for _ in range(count):
+        at = rng.integers(0, n - 2000)
+        length = int(rng.integers(40, 900))
+        amp = rng.random() ** 2.5
+        burst = rng.standard_normal(length) * np.exp(-np.linspace(0, rng.uniform(4, 12), length))
+        clicks[at:at + length] += burst * amp
+    clicks = _wf_bandpass(clicks, 700, 9000)
+    x = bed + clicks * 0.9
+    return _wf_normalize(_wf_loopable(x, 0.3), 0.8)
+
+
+def fire_roar(rng, seconds=8.0):
+    """Mid layer: the deep, fluttering roar of a large flame front."""
+    n = int(seconds * RATE)
+    low = _wf_fast_lowpass(rng.standard_normal(n), 260)
+    body = _wf_bandpass(rng.standard_normal(n), 200, 1100) * 0.4
+    t = np.arange(n) / RATE
+    flutter = 0.75 + 0.25 * np.sin(2 * np.pi * (9 + 3 * _wf_smooth_noise(n, 0.7, rng)) * t)  # flame flicker
+    surge = 0.6 + 0.4 * _wf_smooth_noise(n, 0.6, rng)
+    x = (low * 1.4 + body * flutter) * surge
+    return _wf_normalize(_wf_loopable(x), 0.85)
+
+
+def fire_distant(rng, seconds=10.0):
+    """Far layer: a wide, muffled whoosh-rumble with slow surges."""
+    n = int(seconds * RATE)
+    brown = np.cumsum(rng.standard_normal(n))
+    brown -= _wf_fast_lowpass(brown, 6)
+    x = _wf_fast_lowpass(brown, 180) + _wf_fast_lowpass(rng.standard_normal(n), 500) * 0.15
+    x *= 0.65 + 0.35 * _wf_smooth_noise(n, 0.4, rng)
+    return _wf_normalize(_wf_loopable(x), 0.9)
+
+
+def fire_pop(rng, seconds=1.2):
+    """One-shot: a burning branch snapping (sharp crack + short woody thump + sizzle)."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, seconds, n)
+    crack = _wf_bandpass(rng.standard_normal(n), 1200, 9000) * np.exp(-t * 60)
+    thump = _wf_fast_lowpass(rng.standard_normal(n), 300) * np.exp(-t * 18) * 0.8
+    sizzle = _wf_bandpass(rng.standard_normal(n), 2500, 8000) * np.exp(-t * 4) * 0.08
+    x = crack + thump + sizzle
+    return _wf_normalize(x, 0.9)
+
+
+def fire_whoosh(rng, seconds=2.6):
+    """One-shot: a tree torching - a deep rushing whoosh as the crown goes up, with a burst of crackle."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, seconds, n)
+    env = np.minimum(t / 0.18, 1) * np.exp(-np.maximum(t - 0.18, 0) * 1.6)
+    rush = _wf_bandpass(rng.standard_normal(n), 60, 900) * env
+    hiss = _wf_bandpass(rng.standard_normal(n), 900, 5000) * env * 0.25
+    clicks = np.zeros(n)
+    for _ in range(90):
+        at = int(rng.integers(0, int(n * 0.6)))
+        length = int(rng.integers(60, 700))
+        clicks[at:at + length] += rng.standard_normal(min(length, n - at)) * np.exp(-np.linspace(0, 8, min(length, n - at))) * rng.random() ** 2
+    x = rush * 1.4 + hiss + _wf_bandpass(clicks, 700, 9000) * 0.6 * env
+    return _wf_normalize(x, 0.9)
+
+
+def fire_whirl(rng, seconds=6.0):
+    """Loop: a fire whirl - jet-like roar whose brightness pulses as the vortex rotates."""
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    low = _wf_fast_lowpass(rng.standard_normal(n), 300)
+    mid = _wf_bandpass(rng.standard_normal(n), 300, 1600)
+    high = _wf_bandpass(rng.standard_normal(n), 1600, 6000)
+    rot = 0.5 + 0.5 * np.sin(2 * np.pi * (4.0 + 1.5 * _wf_smooth_noise(n, 0.5, rng)) * t)  # rotation pulse
+    x = low * 1.2 + mid * (0.35 + 0.45 * rot) + high * (0.08 + 0.2 * rot)
+    x *= 0.75 + 0.25 * _wf_smooth_noise(n, 0.8, rng)
+    return _wf_normalize(_wf_loopable(x), 0.85)
 
 
 def main():
@@ -345,6 +461,19 @@ def main():
         write_ogg(f"debris_rattle{i}", debris_rattle(rng))
     earthquake_sounds()
     earthquake_cinematic_sounds()
+    write_wildfire()
+
+
+def write_wildfire():
+    # separate seed so adding sounds never changes the existing files
+    rng = np.random.default_rng(4321)
+    write_ogg("wildfire_crackle", fire_crackle(rng))
+    write_ogg("wildfire_roar", fire_roar(rng))
+    write_ogg("wildfire_distant", fire_distant(rng))
+    for i in range(1, 4):
+        write_ogg(f"wildfire_pop{i}", fire_pop(rng))
+    write_ogg("wildfire_whoosh", fire_whoosh(rng))
+    write_ogg("wildfire_whirl", fire_whirl(rng))
 
 
 if __name__ == "__main__":

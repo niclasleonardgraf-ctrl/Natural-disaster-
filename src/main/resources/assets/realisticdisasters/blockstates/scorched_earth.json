@@ -1,0 +1,38 @@
+{
+  "variants": {
+    "smoldering=false": [
+      {
+        "model": "realisticdisasters:block/scorched_earth"
+      },
+      {
+        "model": "realisticdisasters:block/scorched_earth",
+        "y": 90
+      },
+      {
+        "model": "realisticdisasters:block/scorched_earth",
+        "y": 180
+      },
+      {
+        "model": "realisticdisasters:block/scorched_earth",
+        "y": 270
+      }
+    ],
+    "smoldering=true": [
+      {
+        "model": "realisticdisasters:block/scorched_earth"
+      },
+      {
+        "model": "realisticdisasters:block/scorched_earth",
+        "y": 90
+      },
+      {
+        "model": "realisticdisasters:block/scorched_earth",
+        "y": 180
+      },
+      {
+        "model": "realisticdisasters:block/scorched_earth",
+        "y": 270
+      }
+    ]
+  }
+}
