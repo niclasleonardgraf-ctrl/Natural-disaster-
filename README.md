@@ -45,6 +45,10 @@ Full design spec: [`docs/SPEC.md`](docs/SPEC.md).
 5. Intensity scales radius (30–70 blocks), fissure count (1–4), width (1–3) and depth (4–12), what can fall
    (up to hardness 1.6 at intensity 1 / 4.0 at intensity 5), how much an unsupported block needs to stay up, and damage.
 
+What it looks like: the sky and fog take on a dusty khaki-grey haze over the zone, soft translucent grey-brown dust
+billows along the ground and bursts from fissures as they tear open, real block chips hop off the ground around you,
+and the camera combines the shared sway with a fast, jerky rattle that peaks at the epicentre.
+
 Shortcut for development: `./gradlew runClientVisualTest` loads the save `run/saves/VisualTest`, moves you onto a
 small pillar, plants a test forest and auto-starts an intensity-4 tornado at peak about 100 blocks away
 (`-Drealisticdisasters.autostart=type,intensity,PHASE`, dev only).
@@ -65,7 +69,7 @@ out and lifts back into the cloud. All textures are soft, 64x64 noise-based PNGs
 - `tornado_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.23 ms)
 - `earthquake_fissures_and_crumbling`: fissures open the ground, the house and overhang crumble into falling-block debris, stone bricks crack
 - `earthquake_respects_block_toggle`: with `blockDestruction=false` no blocks change and no debris spawns
-- `earthquake_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.23 ms)
+- `earthquake_intensity3_tick_cost`: the server cost stays below 2 ms/tick (measured ~0.2–0.3 ms)
 - `earthquake_mobs_flee`: a pig near the epicentre runs away during the warning
 
 ## Configuration

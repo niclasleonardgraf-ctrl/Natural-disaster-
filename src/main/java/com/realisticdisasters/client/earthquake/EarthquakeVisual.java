@@ -122,7 +122,7 @@ public final class EarthquakeVisual implements DisasterVisual {
         boolean inside = dist < radius;
         double sx = inside ? cam.x : c.x, sz = inside ? cam.z : c.z;
         double spread = inside ? Math.min(radius, 36) : radius;
-        int dustCount = count(budget * 0.3f * tremor * tremor);
+        int dustCount = count(budget * 0.45f * tremor * tremor);
         for (int i = 0; i < dustCount; i++) {
             double a = RANDOM.nextDouble() * Math.PI * 2;
             double r = Math.sqrt(RANDOM.nextDouble()) * spread;
