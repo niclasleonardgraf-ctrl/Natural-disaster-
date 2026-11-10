@@ -39,5 +39,22 @@
   "realisticdisasters.configuration.destruction": "Destruction & protection",
   "realisticdisasters.configuration.tornado": "Tornado",
   "realisticdisasters.configuration.camera": "Camera",
-  "realisticdisasters.configuration.visuals": "Visuals"
+  "realisticdisasters.configuration.visuals": "Visuals",
+
+  "disaster.realisticdisasters.wildfire": "Wildfire",
+  "disaster.realisticdisasters.wildfire.warning": "You smell smoke... a wildfire has broken out nearby.",
+  "disaster.realisticdisasters.wildfire.spreading": "The wind is driving the fire this way! Get clear of the trees!",
+  "death.attack.realisticdisasters.wildfire": "%1$s was consumed by a wildfire",
+  "death.attack.realisticdisasters.wildfire.player": "%1$s was consumed by a wildfire while fighting %2$s",
+  "subtitles.realisticdisasters.wildfire.crackle": "Wildfire crackles",
+  "subtitles.realisticdisasters.wildfire.roar": "Wildfire roars",
+  "subtitles.realisticdisasters.wildfire.distant": "Distant fire rumbles",
+  "subtitles.realisticdisasters.wildfire.pop": "Burning wood snaps",
+  "block.realisticdisasters.wildfire_flame": "Wildfire Flame",
+  "block.realisticdisasters.charred_log": "Charred Log",
+  "realisticdisasters.configuration.wildfire": "Wildfire",
+  "block.realisticdisasters.scorched_earth": "Scorched Earth",
+  "block.realisticdisasters.scorched_leaves": "Scorched Leaves",
+  "subtitles.realisticdisasters.wildfire.whoosh": "Tree torches",
+  "subtitles.realisticdisasters.wildfire.whirl": "Fire whirl roars"
 }
