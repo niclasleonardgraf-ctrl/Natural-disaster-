@@ -86,7 +86,7 @@ public class TornadoDisaster extends Disaster {
     public TornadoDisaster(ServerLevel level, int id, Vec3 pos, int intensity) {
         super(DisasterType.TORNADO, level, id, pos, intensity);
         int i = this.intensity;
-        this.coreRadius = 2.5f + i * 1.5f;          // 4 .. 10
+        this.coreRadius = 3f + i * 2f;              // 5 .. 13
         this.pullRadius = coreRadius * 3.2f;        // 13 .. 32
         this.height = 38f + i * 12f;                // 50 .. 98
         this.maxHardness = 0.4f + i * 0.55f;        // 0.95 (soil, leaves, glass) .. 3.15 (stone, wood, ores)
@@ -133,6 +133,18 @@ public class TornadoDisaster extends Disaster {
         if (to == Phase.BUILDUP) {
             broadcast(Component.translatable("disaster.realisticdisasters.tornado.touchdown").withStyle(ChatFormatting.RED), 220);
         }
+    }
+
+    /**
+     * Instant removal (/disaster stop ... now): airborne debris goes with it, so nothing keeps raining down afterwards.
+     * A natural end (aftermath) still lets the debris land.
+     */
+    @Override
+    public void forceFinish() {
+        for (Debris d : debris) {
+            if (!d.entity.isRemoved()) d.entity.discard();
+        }
+        super.forceFinish();
     }
 
     @Override
@@ -221,7 +233,8 @@ public class TornadoDisaster extends Disaster {
             BlockPos a = at.relative(dir), b = a.relative(dir);
             if (!level.getBlockState(a).blocksMotion() && !level.getBlockState(b).blocksMotion()) open++;
         }
-        return 0.05f + 0.2f * open;
+        // A sealed room (basement, bunker) gets no wind at all; each open side lets more in.
+        return 0.2f * open;
     }
 
     // ------------------------------------------------------------------ entities
@@ -320,9 +333,9 @@ public class TornadoDisaster extends Disaster {
      */
     private void loadBlocks(TornadoWind wind, float force) {
         if (!DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean()) return;
-        int attempts = Math.round((6 + intensity * 6) * force);
+        int attempts = Math.round((16 + intensity * 16) * force);
         var queue = DisasterManager.blockQueue(level);
-        double reach = coreRadius * 1.7;
+        double reach = coreRadius * 2.0;
         int bottom = Mth.floor(pos.y) - 2;
         for (int i = 0; i < attempts; i++) {
             double a = random.nextDouble() * Math.PI * 2;
@@ -334,16 +347,31 @@ public class TornadoDisaster extends Disaster {
             if (!level.isLoaded(new BlockPos(x, 0, z))) continue;
             int top = Math.min(level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1, bottom + 48);
             if (top < bottom) continue;
-            int y = bottom + random.nextInt(top - bottom + 1);
+            // biased toward the top of the column: exposed surfaces (roofs, crowns, the ground) take the wind
+            double u = random.nextDouble();
+            int y = top - (int) (u * u * (top - bottom + 1));
             double speed = wind.at(x + 0.5, y + 0.5, z + 0.5).length();
             if (speed < 0.2) continue;
-            BlockPos sample = new BlockPos(x, y, z);
-            if (!queue.add(l -> windLoad(sample, speed))) return;
+            // Evaluate the wind load right away (cheap reads); only blocks that actually fail go through the shared,
+            // budgeted block-change queue, so the tornado doesn't crowd out other disasters' work.
+            BlockPos failing = windLoad(new BlockPos(x, y, z), speed);
+            if (failing != null && !queue.add(l -> applyFailure(failing))) return;
         }
     }
 
-    private void windLoad(BlockPos sample, double windSpeed) {
+    /** Re-validates and applies a failure decided earlier (the world may have changed while it was queued). */
+    private void applyFailure(BlockPos p) {
         if (isFinished()) return;
+        BlockState st = level.getBlockState(p);
+        if (st.isAir() || st.getBlock() instanceof LiquidBlock) return;
+        int open = openFaces(p);
+        if (open == 0) return;
+        if (!DisasterProtection.canModify(level, p, st)) return;
+        fail(p, st, open);
+    }
+
+    /** @return the block that fails under this wind, or null */
+    private BlockPos windLoad(BlockPos sample, double windSpeed) {
         // A sample in the air drops to the surface below it: wind attacks surfaces.
         BlockPos p = sample;
         BlockState st = level.getBlockState(p);
@@ -351,15 +379,24 @@ public class TornadoDisaster extends Disaster {
             p = p.below();
             st = level.getBlockState(p);
         }
-        if (st.isAir() || st.getBlock() instanceof LiquidBlock) return;
+        if (st.isAir() || st.getBlock() instanceof LiquidBlock) return null;
         int open = openFaces(p);
-        if (open == 0) return;   // fully enclosed: the wind can't get at it
+        if (open == 0) return null;   // fully enclosed: the wind can't get at it
+        // Wind only loads faces that face the outside: a floor or wall inside a sealed room is protected until the
+        // roof or walls around it are torn away.
+        float reach = 0f;
+        if (!level.getBlockState(p.above()).blocksMotion()) reach = Math.max(reach, exposure(p.above()));
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            if (reach >= 1f) break;
+            BlockPos q = p.relative(dir);
+            if (!level.getBlockState(q).blocksMotion()) reach = Math.max(reach, exposure(q));
+        }
+        if (reach <= 0f) return null;
         double resist = windResistance(st, p);
-        double load = windSpeed * (0.45 + 0.55 * open / 5.0);
+        double load = windSpeed * reach * (0.45 + 0.55 * open / 5.0);
         double over = load / resist - 1;
-        if (over <= 0 || random.nextDouble() > Math.min(1, over * 1.2)) return;
-        if (!DisasterProtection.canModify(level, p, st)) return;
-        fail(p, st, open);
+        if (over <= 0 || random.nextDouble() > Math.min(1, over * 2.5)) return null;
+        return p;
     }
 
     private int openFaces(BlockPos p) {
@@ -376,15 +413,17 @@ public class TornadoDisaster extends Disaster {
         if (st.hasBlockEntity()) return Double.MAX_VALUE;
         float hardness = st.getDestroySpeed(level, p);
         if (hardness < 0) return Double.MAX_VALUE;
-        if (st.canBeReplaced() || st.is(BlockTags.FLOWERS) || st.is(BlockTags.SAPLINGS) || st.is(BlockTags.CROPS)) return 0.12;
-        if (st.is(BlockTags.LEAVES)) return 0.3;
-        if (st.is(Tags.Blocks.GLASS_BLOCKS) || st.is(Tags.Blocks.GLASS_PANES)) return 0.4;
-        if (st.is(BlockTags.WOOL) || st.is(BlockTags.WOOL_CARPETS)) return 0.45;
+        // Calibrated so a tornado does tornado-like damage: EF1-ish (intensity 1) strips trees and breaks windows,
+        // intensity 3 tears roofs off and snaps trunks, intensity 4-5 levels wooden houses and breaks stone walls.
+        if (st.canBeReplaced() || st.is(BlockTags.FLOWERS) || st.is(BlockTags.SAPLINGS) || st.is(BlockTags.CROPS)) return 0.08;
+        if (st.is(BlockTags.LEAVES)) return 0.15;
+        if (st.is(Tags.Blocks.GLASS_BLOCKS) || st.is(Tags.Blocks.GLASS_PANES)) return 0.25;
+        if (st.is(BlockTags.WOOL) || st.is(BlockTags.WOOL_CARPETS)) return 0.3;
         if (st.is(BlockTags.PLANKS) || st.is(BlockTags.WOODEN_FENCES) || st.is(BlockTags.WOODEN_DOORS)
-                || st.is(BlockTags.WOODEN_STAIRS) || st.is(BlockTags.WOODEN_SLABS) || st.is(BlockTags.WOODEN_TRAPDOORS)) return 0.7;
-        if (st.is(BlockTags.LOGS)) return 0.8;
-        if (isTurf(st) || isSoil(st)) return 0.75;
-        return 0.35 + hardness * 0.4;   // stone ~0.95, cobble/bricks ~1.15, obsidian: never
+                || st.is(BlockTags.WOODEN_STAIRS) || st.is(BlockTags.WOODEN_SLABS) || st.is(BlockTags.WOODEN_TRAPDOORS)) return 0.4;
+        if (st.is(BlockTags.LOGS)) return 0.5;
+        if (isTurf(st) || isSoil(st)) return 0.55;
+        return 0.2 + hardness * 0.3;   // stone ~0.65, cobble/bricks ~0.8, deepslate ~1.1, obsidian: never
     }
 
     private static boolean isTurf(BlockState st) {
@@ -412,7 +451,7 @@ public class TornadoDisaster extends Disaster {
         }
         if (isSoil(st)) {
             // Only violent tornadoes scour the soil itself.
-            if (topExposed && intensity >= 4 && random.nextFloat() < 0.2f) launch(p, st, true);
+            if (topExposed && intensity >= 3 && random.nextFloat() < 0.3f) launch(p, st, true);
             return;
         }
         if (st.canBeReplaced() || st.is(BlockTags.FLOWERS) || st.is(BlockTags.CROPS) || st.is(BlockTags.SAPLINGS)) {

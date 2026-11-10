@@ -130,7 +130,7 @@ public final class EffectsManager {
         if (!ClientConfig.SKY_TINT.getAsBoolean()) return base;
         int tinted = tint(base, cloud, 0.9f);
         // Vanilla's blocky clouds give way to the storm's own soft cloud deck.
-        float keep = 1f - Mth.clamp(cloud[3], 0f, 1f) * 0.95f;
+        float keep = 1f;   // vanilla clouds stay (darkened): they form the storm's cloud layer
         return ARGB.color(Math.round(ARGB.alpha(base) * keep), tinted);
     }
 

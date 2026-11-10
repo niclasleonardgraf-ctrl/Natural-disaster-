@@ -179,40 +179,12 @@ public final class TornadoVisual implements DisasterVisual {
         // be evicted by the funnel.
         float budget = (22 + d.intensity * 14) * density * lod;
 
-        // Cloud base, built from flat, downward-facing sheets so it reads as one continuous ceiling receding in
-        // perspective. It is lowest (the wall cloud) around the funnel and rises outward in a gentle step.
-        float baseRate = Math.max(0.35f, s) * Math.max(0.5f, density);
-        int wallSheets = count(0.35f * baseRate * (1 + d.intensity * 0.15f));
-        for (int i = 0; i < wallSheets; i++) {
-            float ring = 0.3f + RANDOM.nextFloat() * 3.2f;
-            spawnAt(level, ModRegistries.CLOUD_SHEET.get(), d, 0.9f, ring * core, ring, height);
-        }
-        // Wide enough to reach the horizon from most viewpoints; the outer rings fade (no hard disc edge).
-        int deckSheets = count(2.2f * baseRate * (1 + d.intensity * 0.12f));
-        for (int i = 0; i < deckSheets; i++) {
-            float ring = 3.5f + (float) Math.sqrt(RANDOM.nextFloat()) * 24f;
-            spawnAt(level, ModRegistries.CLOUD_SHEET.get(), d, 0.95f, ring * core, ring, height);
-        }
-        // Rotating concentric striations in the base (the "mothership" look of a strong supercell).
-        int bands = count(0.6f * baseRate);
-        for (int i = 0; i < bands; i++) {
-            float ring = 1.8f + RANDOM.nextFloat() * 10f;
-            spawnAt(level, ModRegistries.CLOUD_BAND.get(), d, 0.92f, ring * core, ring, height);
-        }
-        // Rain curtains hanging from the cloud base on the rear flank (behind the direction of travel).
-        if (dist < 400) {
-            int rainCount = count(budget * 0.05f * Math.max(0.3f, s));
-            float hx = d.data(TornadoDisaster.D_HEADING_X), hz = d.data(TornadoDisaster.D_HEADING_Z);
-            double back = Math.atan2(-hz, -hx);
-            for (int i = 0; i < rainCount; i++) {
-                double a = back + (RANDOM.nextDouble() - 0.5) * 2.4;
-                float ring = 4f + RANDOM.nextFloat() * 7f;
-                float h = RANDOM.nextFloat() * 0.85f;
-                Vec3 base = d.pos();
-                level.addParticle(ModRegistries.RAIN_SHAFT.get(), true, true,
-                        base.x + Math.cos(a) * ring * core, base.y + h * height, base.z + Math.sin(a) * ring * core,
-                        d.id, h, ring);
-            }
+        // Wall cloud: a soft, lowered cloud mass around the top of the funnel. The rest of the storm is the
+        // darkened vanilla cloud layer and sky (flat tiles / rain sprites showed hard edges in real terrain).
+        int wallCount = count(budget * 0.12f * Math.max(0.35f, s));
+        for (int i = 0; i < wallCount; i++) {
+            float ring = 0.6f + RANDOM.nextFloat() * 3.2f;
+            spawnAt(level, ModRegistries.WALL_CLOUD.get(), d, 0.86f, ring * core, ring, height);
         }
 
         // Condensation funnel lowering from the cloud base.

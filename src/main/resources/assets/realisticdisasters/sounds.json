@@ -93,5 +93,282 @@
       "realisticdisasters:debris_rattle2",
       "realisticdisasters:debris_rattle3"
     ]
+  },
+  "disaster.earthquake.rumble": {
+    "subtitle": "subtitles.realisticdisasters.earthquake.rumble",
+    "sounds": [
+      {
+        "name": "realisticdisasters:quake_rumble",
+        "stream": true
+      }
+    ]
+  },
+  "disaster.earthquake.distant": {
+    "subtitle": "subtitles.realisticdisasters.earthquake.distant",
+    "sounds": [
+      {
+        "name": "realisticdisasters:quake_distant",
+        "stream": true
+      }
+    ]
+  },
+  "disaster.earthquake.crack": {
+    "subtitle": "subtitles.realisticdisasters.earthquake.crack",
+    "sounds": [
+      {
+        "name": "realisticdisasters:quake_crack1",
+        "attenuation_distance": 48
+      },
+      {
+        "name": "realisticdisasters:quake_crack2",
+        "attenuation_distance": 48
+      },
+      {
+        "name": "realisticdisasters:quake_crack3",
+        "attenuation_distance": 48
+      }
+    ]
+  },
+  "disaster.earthquake.boom": {
+    "subtitle": "subtitles.realisticdisasters.earthquake.boom",
+    "sounds": [
+      {
+        "name": "realisticdisasters:quake_boom"
+      }
+    ]
+  },
+  "disaster.earthquake.collapse": {
+    "subtitle": "subtitles.realisticdisasters.earthquake.collapse",
+    "sounds": [
+      {
+        "name": "realisticdisasters:collapse_crash1",
+        "attenuation_distance": 64
+      },
+      {
+        "name": "realisticdisasters:collapse_crash2",
+        "attenuation_distance": 64
+      },
+      {
+        "name": "realisticdisasters:collapse_crash3",
+        "attenuation_distance": 64
+      }
+    ]
+  },
+  "disaster.wildfire.crackle": {
+    "subtitle": "subtitles.realisticdisasters.wildfire.crackle",
+    "sounds": [
+      {
+        "name": "realisticdisasters:wildfire_crackle",
+        "stream": true,
+        "attenuation_distance": 40
+      }
+    ]
+  },
+  "disaster.wildfire.roar": {
+    "subtitle": "subtitles.realisticdisasters.wildfire.roar",
+    "sounds": [
+      {
+        "name": "realisticdisasters:wildfire_roar",
+        "stream": true,
+        "attenuation_distance": 110
+      }
+    ]
+  },
+  "disaster.wildfire.distant": {
+    "subtitle": "subtitles.realisticdisasters.wildfire.distant",
+    "sounds": [
+      {
+        "name": "realisticdisasters:wildfire_distant",
+        "stream": true
+      }
+    ]
+  },
+  "disaster.wildfire.pop": {
+    "subtitle": "subtitles.realisticdisasters.wildfire.pop",
+    "sounds": [
+      {
+        "name": "realisticdisasters:wildfire_pop1",
+        "attenuation_distance": 32
+      },
+      {
+        "name": "realisticdisasters:wildfire_pop2",
+        "attenuation_distance": 32
+      },
+      {
+        "name": "realisticdisasters:wildfire_pop3",
+        "attenuation_distance": 32
+      }
+    ]
+  },
+  "disaster.wildfire.whoosh": {
+    "subtitle": "subtitles.realisticdisasters.wildfire.whoosh",
+    "sounds": [
+      {
+        "name": "realisticdisasters:wildfire_whoosh",
+        "attenuation_distance": 96
+      }
+    ]
+  },
+  "disaster.wildfire.whirl": {
+    "subtitle": "subtitles.realisticdisasters.wildfire.whirl",
+    "sounds": [
+      {
+        "name": "realisticdisasters:wildfire_whirl",
+        "stream": true,
+        "attenuation_distance": 96
+      }
+    ]
+  },
+  "disaster.volcano.rumble": {
+    "subtitle": "subtitles.realisticdisasters.volcano.rumble",
+    "sounds": [
+      {
+        "name": "realisticdisasters:volcano_rumble",
+        "stream": true,
+        "attenuation_distance": 128
+      }
+    ]
+  },
+  "disaster.volcano.distant": {
+    "subtitle": "subtitles.realisticdisasters.volcano.distant",
+    "sounds": [
+      {
+        "name": "realisticdisasters:volcano_distant",
+        "stream": true
+      }
+    ]
+  },
+  "disaster.volcano.blast": {
+    "subtitle": "subtitles.realisticdisasters.volcano.blast",
+    "sounds": [
+      "realisticdisasters:volcano_blast1",
+      "realisticdisasters:volcano_blast2",
+      "realisticdisasters:volcano_blast3"
+    ]
+  },
+  "disaster.volcano.bomb_impact": {
+    "subtitle": "subtitles.realisticdisasters.volcano.bomb_impact",
+    "sounds": [
+      {
+        "name": "realisticdisasters:bomb_impact1",
+        "attenuation_distance": 48
+      },
+      {
+        "name": "realisticdisasters:bomb_impact2",
+        "attenuation_distance": 48
+      }
+    ]
+  },
+  "disaster.meteor.whoosh": {
+    "subtitle": "subtitles.realisticdisasters.meteor.whoosh",
+    "sounds": [
+      {
+        "name": "realisticdisasters:meteor_whoosh1",
+        "attenuation_distance": 64
+      },
+      {
+        "name": "realisticdisasters:meteor_whoosh2",
+        "attenuation_distance": 64
+      }
+    ]
+  },
+  "disaster.meteor.whoosh_distant": {
+    "subtitle": "subtitles.realisticdisasters.meteor.whoosh_distant",
+    "sounds": [
+      "realisticdisasters:meteor_whoosh_distant1",
+      "realisticdisasters:meteor_whoosh_distant2"
+    ]
+  },
+  "disaster.meteor.impact": {
+    "subtitle": "subtitles.realisticdisasters.meteor.impact",
+    "sounds": [
+      {
+        "name": "realisticdisasters:meteor_impact1",
+        "attenuation_distance": 64
+      },
+      {
+        "name": "realisticdisasters:meteor_impact2",
+        "attenuation_distance": 64
+      }
+    ]
+  },
+  "disaster.meteor.impact_distant": {
+    "subtitle": "subtitles.realisticdisasters.meteor.impact_distant",
+    "sounds": [
+      "realisticdisasters:meteor_impact_distant1",
+      "realisticdisasters:meteor_impact_distant2"
+    ]
+  },
+  "disaster.tsunami.roar": {
+    "subtitle": "subtitles.realisticdisasters.tsunami.roar",
+    "sounds": [
+      {
+        "name": "realisticdisasters:tsunami_roar",
+        "stream": true,
+        "attenuation_distance": 96
+      }
+    ]
+  },
+  "disaster.tsunami.surf": {
+    "subtitle": "subtitles.realisticdisasters.tsunami.surf",
+    "sounds": [
+      {
+        "name": "realisticdisasters:tsunami_surf",
+        "stream": true
+      }
+    ]
+  },
+  "disaster.tsunami.crash": {
+    "subtitle": "subtitles.realisticdisasters.tsunami.crash",
+    "sounds": [
+      {
+        "name": "realisticdisasters:tsunami_crash1",
+        "attenuation_distance": 64
+      },
+      {
+        "name": "realisticdisasters:tsunami_crash2",
+        "attenuation_distance": 64
+      },
+      {
+        "name": "realisticdisasters:tsunami_crash3",
+        "attenuation_distance": 64
+      }
+    ]
+  },
+  "disaster.blizzard.howl": {
+    "subtitle": "subtitles.realisticdisasters.blizzard.howl",
+    "sounds": [
+      {
+        "name": "realisticdisasters:blizzard_howl",
+        "stream": true
+      }
+    ]
+  },
+  "disaster.blizzard.distant": {
+    "subtitle": "subtitles.realisticdisasters.blizzard.distant",
+    "sounds": [
+      {
+        "name": "realisticdisasters:blizzard_distant",
+        "stream": true
+      }
+    ]
+  },
+  "disaster.sandstorm.howl": {
+    "subtitle": "subtitles.realisticdisasters.sandstorm.howl",
+    "sounds": [
+      {
+        "name": "realisticdisasters:sandstorm_howl",
+        "stream": true
+      }
+    ]
+  },
+  "disaster.sandstorm.distant": {
+    "subtitle": "subtitles.realisticdisasters.sandstorm.distant",
+    "sounds": [
+      {
+        "name": "realisticdisasters:sandstorm_distant",
+        "stream": true
+      }
+    ]
   }
 }

@@ -1,12 +1,20 @@
-#!/usr/bin/env python3
 """Writes the GameTest arena structure (gzip NBT) used by the automated disaster tests.
 Usage: python3 tools/gen_structures.py
 """
+
+
 import gzip
+
+
 import os
+
+
 import struct
 
+
 DATA_VERSION = 4790  # Minecraft 26.1.2
+
+
 OUT = os.path.join(os.path.dirname(__file__), "..", "src", "main", "resources", "data", "realisticdisasters", "structure")
 
 
@@ -42,7 +50,7 @@ def write_structure(name, size, blocks):
     root = {
         "DataVersion": (3, DATA_VERSION),
         "size": (9, (3, list(size))),
-        "palette": (9, (10, [{"Name": (8, s)} for s in palette])),
+        "palette": (9, (10, [palette_entry(s) for s in palette])),
         "blocks": (9, (10, [{"pos": (9, (3, list(p))), "state": (3, i)} for p, i in entries])),
         "entities": (9, (10, [])),
     }
@@ -88,5 +96,178 @@ def arena():
     write_structure("tornado_arena", (sx, sy, sz), blocks)
 
 
-if __name__ == "__main__":
+def earthquake_arena():
+    """40x20x40: deep ground (fissures need depth), a cobblestone house with a plank roof and windows,
+    a stone-brick pillar and a plank overhang - things an earthquake can crack, shatter and bring down."""
+    sx, sy, sz = 40, 20, 40
+    blocks = {}
+    for x in range(sx):
+        for z in range(sz):
+            for y in range(0, 7):
+                blocks[(x, y, z)] = "minecraft:stone"
+            blocks[(x, 7, z)] = "minecraft:dirt"
+            blocks[(x, 8, z)] = "minecraft:dirt"
+            blocks[(x, 9, z)] = "minecraft:grass_block"
+    # house: walls x/z 24..30, y 10..13, flat plank roof at y 14
+    for x in range(24, 31):
+        for z in range(24, 31):
+            blocks[(x, 9, z)] = "minecraft:dirt"
+            for y in range(10, 14):
+                if x in (24, 30) or z in (24, 30):
+                    blocks[(x, y, z)] = "minecraft:cobblestone"
+            blocks[(x, 14, z)] = "minecraft:oak_planks"
+    for (x, z) in ((27, 24), (27, 30), (24, 27), (30, 27)):
+        blocks[(x, 11, z)] = "minecraft:glass"
+        blocks[(x, 12, z)] = "minecraft:glass"
+    # stone-brick pillar
+    for y in range(10, 16):
+        blocks[(12, y, 12)] = "minecraft:stone_bricks"
+        blocks[(13, y, 12)] = "minecraft:stone_bricks"
+    # plank overhang on a cobblestone post
+    for y in range(10, 13):
+        blocks[(8, y, 26)] = "minecraft:cobblestone"
+    for x in range(8, 13):
+        blocks[(x, 13, 26)] = "minecraft:oak_planks"
+    for x in range(sx):
+        for y in range(10, sy):
+            for z in range(sz):
+                blocks.setdefault((x, y, z), "minecraft:air")
+    write_structure("earthquake_arena", (sx, sy, sz), blocks)
+
+
+def palette_entry(state):
+    """"minecraft:oak_leaves[persistent=true]" -> {Name, Properties}."""
+    if "[" not in state:
+        return {"Name": (8, state)}
+    name, props = state[:-1].split("[", 1)
+    values = dict(kv.split("=") for kv in props.split(","))
+    return {"Name": (8, name), "Properties": (10, {k: (8, v) for k, v in values.items()})}
+
+
+def wildfire_arena(name="wildfire_arena", sx=32, sz=32, trees=((8, 8), (24, 10), (11, 24))):
+    """Grass with brush patches and oak trees: fuel of every kind for the wildfire tests."""
+    sy = 12
+    blocks = {}
+    for x in range(sx):
+        for z in range(sz):
+            blocks[(x, 0, z)] = "minecraft:stone"
+            blocks[(x, 1, z)] = "minecraft:dirt"
+            blocks[(x, 2, z)] = "minecraft:dirt"
+            blocks[(x, 3, z)] = "minecraft:grass_block"
+            # deterministic brush pattern: short grass, some tall grass and ferns
+            h = (x * 7 + z * 13) % 11
+            if h in (0, 3, 7):
+                blocks[(x, 4, z)] = "minecraft:short_grass"
+            elif h == 5:
+                blocks[(x, 4, z)] = "minecraft:fern"
+    for tx, tz in trees:
+        blocks[(tx, 3, tz)] = "minecraft:dirt"
+        for y in range(4, 9):
+            blocks[(tx, y, tz)] = "minecraft:oak_log"
+        for x in range(tx - 2, tx + 3):
+            for z in range(tz - 2, tz + 3):
+                for y in (7, 8, 9):
+                    r = 2 if y < 9 else 1
+                    if abs(x - tx) <= r and abs(z - tz) <= r and (x, y, z) not in blocks:
+                        blocks[(x, y, z)] = "minecraft:oak_leaves[persistent=true]"
+                if (x, 4, z) in blocks and blocks[(x, 4, z)] != "minecraft:oak_log":
+                    del blocks[(x, 4, z)]  # no brush right under the canopy
+    for x in range(sx):
+        for y in range(4, sy):
+            for z in range(sz):
+                blocks.setdefault((x, y, z), "minecraft:air")
+    write_structure(name, (sx, sy, sz), blocks)
+
+
+def meteor_arena():
+    """Deeper than the tornado arena so a crater (and its core) fits inside the structure."""
+    sx, sy, sz = 32, 18, 32
+    blocks = {}
+    for x in range(sx):
+        for z in range(sz):
+            for y in range(0, 9):
+                blocks[(x, y, z)] = "minecraft:stone"
+            blocks[(x, 9, z)] = "minecraft:dirt"
+            blocks[(x, 10, z)] = "minecraft:dirt"
+            blocks[(x, 11, z)] = "minecraft:grass_block"
+            for y in range(12, sy):
+                blocks[(x, y, z)] = "minecraft:air"
+    write_structure("meteor_arena", (sx, sy, sz), blocks)
+
+
+def tsunami_arena():
+    """A walled strip of sea (x 0-15, surface y4), a sand beach (x 16-19) and flat grassland with plants and a small
+    pre-existing pond (a water source at 24,5,24 inside a cobblestone ring) that the flood must leave alone."""
+    sx, sy, sz = 56, 12, 48
+    blocks = {}
+    for x in range(sx):
+        for z in range(sz):
+            blocks[(x, 0, z)] = "minecraft:stone"
+            if x < 16:
+                wall = x == 0 or z == 0 or z == sz - 1
+                for y in range(1, 5):
+                    blocks[(x, y, z)] = "minecraft:stone" if wall else "minecraft:water"
+                if wall:
+                    blocks[(x, 5, z)] = "minecraft:stone"
+            else:
+                for y in range(1, 4):
+                    blocks[(x, y, z)] = "minecraft:dirt"
+                blocks[(x, 4, z)] = "minecraft:sand" if x < 20 else "minecraft:grass_block"
+    # the pond: water on dirt, ringed by cobblestone
+    blocks[(24, 4, 24)] = "minecraft:dirt"
+    blocks[(24, 5, 24)] = "minecraft:water"
+    for x in range(23, 26):
+        for z in range(23, 26):
+            blocks[(x, 4, z)] = "minecraft:dirt"  # grass would die under the ring
+            if (x, z) != (24, 24):
+                blocks[(x, 5, z)] = "minecraft:cobblestone"
+    # plants for the wave to tear out
+    for x in range(22, 46, 3):
+        for z in range(6, 43, 4):
+            if 22 <= x <= 26 and 22 <= z <= 26:
+                continue
+            blocks[(x, 5, z)] = "minecraft:poppy" if (x + z) % 3 == 0 else "minecraft:short_grass"
+    for x in range(sx):
+        for y in range(1, sy):
+            for z in range(sz):
+                blocks.setdefault((x, y, z), "minecraft:air")
+    write_structure("tsunami_arena", (sx, sy, sz), blocks)
+
+
+def _main_1():
     arena()
+
+
+def _main_2():
+    arena()
+    earthquake_arena()
+
+
+def _main_3():
+    arena()
+    wildfire_arena()
+    # bigger field for the wildfire performance test, so an intensity-3 fire has room to build a real front
+    wildfire_arena("wildfire_field", 48, 48, [(x, z) for x in range(8, 46, 13) for z in range(9, 46, 14)])
+
+
+def _main_4():
+    arena()
+    meteor_arena()
+
+
+def _main_5():
+    arena()
+    tsunami_arena()
+
+
+def main():
+    # each merged branch's original entry point (deterministic, so shared steps can repeat safely)
+    _main_1()
+    _main_2()
+    _main_3()
+    _main_4()
+    _main_5()
+
+
+if __name__ == "__main__":
+    main()

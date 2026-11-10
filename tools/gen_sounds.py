@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Synthesizes the mod's sounds (original work, released as CC0 with the mod).
 
 Modelled on real tornado recordings and eyewitness descriptions:
@@ -12,18 +11,28 @@ Modelled on real tornado recordings and eyewitness descriptions:
 Writes mono OGG Vorbis (mono is required for positional audio). Needs numpy and ffmpeg (libvorbis).
 Usage: python3 tools/gen_sounds.py
 """
+
+
 import os
+
+
 import subprocess
+
+
 import tempfile
+
+
 import wave
+
 
 import numpy as np
 
+
 RATE = 44100
+
+
 OUT = os.path.join(os.path.dirname(__file__), "..", "src", "main", "resources", "assets", "realisticdisasters", "sounds")
 
-
-# ----------------------------------------------------------------------------- building blocks
 
 def spectral(x, gain_fn):
     """Apply a frequency-domain gain curve gain_fn(freqs)."""
@@ -115,8 +124,6 @@ def write_ogg(name, x):
     os.remove(path)
 
 
-# ----------------------------------------------------------------------------- tornado layers
-
 def tornado_distant(rng, seconds=12.0):
     """Freight train: deep continuous rumble, resonant low end, slow rhythmic chug."""
     n = int(seconds * RATE)
@@ -173,8 +180,6 @@ def wind_howl(rng, seconds=10.0):
     x *= curve(n, 0.6, rng, 0.5, 1.0)
     return normalize(loopable(x), 0.9)
 
-
-# ----------------------------------------------------------------------------- impacts
 
 def debris_thud(rng, seconds=0.9):
     """Heavy object hitting the ground: low body thump plus a short gritty noise burst."""
@@ -243,7 +248,464 @@ def gust(rng, seconds=3.0):
     return normalize(x * env, 0.75)
 
 
-def main():
+def quake_rumble(rng, seconds=9.0):
+    """Earthquake close layer: deep grinding rumble with rattling debris and irregular jolts."""
+    n = int(seconds * RATE)
+    brown = np.cumsum(rng.standard_normal(n))
+    brown -= fast_lowpass(brown, 6)
+    sub = fast_lowpass(brown, 90)
+    grind = bandpass(rng.standard_normal(n), 120, 600) * 0.35 * smooth_noise(n, 3, rng)
+    rattle = bandpass(rng.standard_normal(n), 900, 3500) * 0.06 * (smooth_noise(n, 9, rng) ** 3)
+    jolts = 0.6 + 0.4 * smooth_noise(n, 1.6, rng) ** 2
+    x = (normalize(sub) * 1.0 + normalize(grind) * 0.45 + normalize(rattle) * 0.18) * jolts
+    return normalize(loopable(x))
+
+
+def quake_distant(rng, seconds=10.0):
+    """Earthquake far layer: very low, slowly swelling rumble felt more than heard."""
+    n = int(seconds * RATE)
+    brown = np.cumsum(rng.standard_normal(n))
+    brown -= fast_lowpass(brown, 5)
+    x = fast_lowpass(brown, 70)
+    x *= 0.55 + 0.45 * smooth_noise(n, 0.4, rng)
+    return normalize(loopable(x), 0.9)
+
+
+def quake_crack(rng, seconds=1.6):
+    """Rock cracking one-shot: a sharp broadband snap, a few splintering ticks and a short low thud."""
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    snap = bandpass(rng.standard_normal(n), 300, 6000) * np.exp(-t * 28)
+    ticks = np.zeros(n)
+    for _ in range(rng.integers(4, 9)):
+        at = int(rng.uniform(0.02, 0.5) * RATE)
+        ln = int(0.03 * RATE)
+        ticks[at:at + ln] += rng.standard_normal(min(ln, n - at)) * np.exp(-np.arange(min(ln, n - at)) / (0.006 * RATE)) * rng.uniform(0.3, 0.8)
+    ticks = bandpass(ticks, 800, 7000)
+    thud = fast_lowpass(rng.standard_normal(n), 150) * np.exp(-t * 6) * np.minimum(t / 0.01, 1)
+    x = normalize(snap) + normalize(ticks) * 0.5 + normalize(thud) * 0.8
+    return normalize(x, 0.9)
+
+
+def quake_boom(rng, seconds=5.0):
+    """Earthquake boom: the deep thump people hear as the P-wave arrives, rolling into a low rumble."""
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    # Sub-bass thump: a sine sweeping down from ~55 Hz to ~28 Hz with a fast attack.
+    freq = 28 + 27 * np.exp(-t * 3.0)
+    phase = 2 * np.pi * np.cumsum(freq) / RATE
+    thump = np.sin(phase) * np.minimum(t / 0.02, 1) * np.exp(-t * 2.2)
+    body = fast_lowpass(rng.standard_normal(n), 90) * np.minimum(t / 0.05, 1) * np.exp(-t * 0.9)
+    crackle = bandpass(rng.standard_normal(n), 300, 2500) * np.exp(-t * 6) * 0.15
+    x = normalize(thump) * 1.0 + normalize(body) * 0.6 + normalize(crackle) * 0.25
+    return normalize(x, 0.95)
+
+
+def collapse_crash(rng, seconds=3.2):
+    """Structure collapse: heavy impact, breaking masonry, then a long tail of tumbling and settling debris."""
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    impact = fast_lowpass(rng.standard_normal(n), 180) * np.minimum(t / 0.01, 1) * np.exp(-t * 5)
+    crash = bandpass(rng.standard_normal(n), 400, 7000) * np.exp(-t * 3.5)
+    # Tumbling debris: many short knocks of varying size, thinning out over time.
+    debris = np.zeros(n)
+    for _ in range(int(rng.integers(70, 110))):
+        at = int(min(n - 1, rng.exponential(0.7) * RATE))
+        ln = int(rng.uniform(0.01, 0.05) * RATE)
+        seg = rng.standard_normal(min(ln, n - at)) * np.exp(-np.arange(min(ln, n - at)) / (0.008 * RATE))
+        debris[at:at + len(seg)] += seg * rng.uniform(0.2, 1.0)
+    debris = bandpass(debris, 150, 5000)
+    x = normalize(impact) * 0.9 + normalize(crash) * 0.55 + normalize(debris) * 0.7
+    return normalize(x, 0.95)
+
+
+def earthquake_cinematic_sounds():
+    """Boom and collapse crashes (own seed, so earlier files stay identical)."""
+    rng = np.random.default_rng(7331)
+    write_ogg("quake_boom", quake_boom(rng))
+    for i in range(1, 4):
+        write_ogg(f"collapse_crash{i}", collapse_crash(rng))
+
+
+def earthquake_sounds():
+    """Writes only the earthquake files (own seed, so the tornado sounds are untouched)."""
+    rng = np.random.default_rng(5150)
+    write_ogg("quake_rumble", quake_rumble(rng))
+    write_ogg("quake_distant", quake_distant(rng))
+    for i in range(1, 4):
+        write_ogg(f"quake_crack{i}", quake_crack(rng))
+
+
+def _wf_fast_lowpass(x, cutoff):
+    """Vectorised FFT low-pass for long buffers."""
+    spec = np.fft.rfft(x)
+    freqs = np.fft.rfftfreq(len(x), 1 / RATE)
+    spec *= 1 / (1 + (freqs / cutoff) ** 4)
+    return np.fft.irfft(spec, len(x))
+
+
+def _wf_bandpass(x, lo, hi):
+    spec = np.fft.rfft(x)
+    freqs = np.fft.rfftfreq(len(x), 1 / RATE)
+    spec *= (1 / (1 + (lo / np.maximum(freqs, 1)) ** 4)) * (1 / (1 + (freqs / hi) ** 4))
+    return np.fft.irfft(spec, len(x))
+
+
+def _wf_smooth_noise(n, rate_hz, rng):
+    """Slow random modulation curve in 0..1."""
+    pts = max(4, int(n / RATE * rate_hz) + 2)
+    ctrl = rng.random(pts)
+    xs = np.linspace(0, pts - 1, n)
+    return np.interp(xs, np.arange(pts), ctrl)
+
+
+def _wf_loopable(x, fade=0.5):
+    """Crossfade the tail into the head so the buffer loops seamlessly."""
+    f = int(fade * RATE)
+    head, tail = x[:f].copy(), x[-f:].copy()
+    ramp = np.linspace(0, 1, f)
+    x = x[:-f].copy()
+    x[:f] = head * ramp + tail * (1 - ramp)
+    return x
+
+
+def _wf_normalize(x, peak=0.85):
+    return x / (np.max(np.abs(x)) + 1e-9) * peak
+
+
+def fire_crackle(rng, seconds=6.0):
+    """Close wildfire layer: soft hiss bed with dense random crackles and snaps."""
+    n = int(seconds * RATE)
+    bed = _wf_bandpass(rng.standard_normal(n), 300, 3000) * 0.12 * (0.6 + 0.4 * _wf_smooth_noise(n, 3, rng))
+    clicks = np.zeros(n)
+    count = int(seconds * 55)
+    for _ in range(count):
+        at = rng.integers(0, n - 2000)
+        length = int(rng.integers(40, 900))
+        amp = rng.random() ** 2.5
+        burst = rng.standard_normal(length) * np.exp(-np.linspace(0, rng.uniform(4, 12), length))
+        clicks[at:at + length] += burst * amp
+    clicks = _wf_bandpass(clicks, 700, 9000)
+    x = bed + clicks * 0.9
+    return _wf_normalize(_wf_loopable(x, 0.3), 0.8)
+
+
+def fire_roar(rng, seconds=8.0):
+    """Mid layer: the deep, fluttering roar of a large flame front."""
+    n = int(seconds * RATE)
+    low = _wf_fast_lowpass(rng.standard_normal(n), 260)
+    body = _wf_bandpass(rng.standard_normal(n), 200, 1100) * 0.4
+    t = np.arange(n) / RATE
+    flutter = 0.75 + 0.25 * np.sin(2 * np.pi * (9 + 3 * _wf_smooth_noise(n, 0.7, rng)) * t)  # flame flicker
+    surge = 0.6 + 0.4 * _wf_smooth_noise(n, 0.6, rng)
+    x = (low * 1.4 + body * flutter) * surge
+    return _wf_normalize(_wf_loopable(x), 0.85)
+
+
+def fire_distant(rng, seconds=10.0):
+    """Far layer: a wide, muffled whoosh-rumble with slow surges."""
+    n = int(seconds * RATE)
+    brown = np.cumsum(rng.standard_normal(n))
+    brown -= _wf_fast_lowpass(brown, 6)
+    x = _wf_fast_lowpass(brown, 180) + _wf_fast_lowpass(rng.standard_normal(n), 500) * 0.15
+    x *= 0.65 + 0.35 * _wf_smooth_noise(n, 0.4, rng)
+    return _wf_normalize(_wf_loopable(x), 0.9)
+
+
+def fire_pop(rng, seconds=1.2):
+    """One-shot: a burning branch snapping (sharp crack + short woody thump + sizzle)."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, seconds, n)
+    crack = _wf_bandpass(rng.standard_normal(n), 1200, 9000) * np.exp(-t * 60)
+    thump = _wf_fast_lowpass(rng.standard_normal(n), 300) * np.exp(-t * 18) * 0.8
+    sizzle = _wf_bandpass(rng.standard_normal(n), 2500, 8000) * np.exp(-t * 4) * 0.08
+    x = crack + thump + sizzle
+    return _wf_normalize(x, 0.9)
+
+
+def fire_whoosh(rng, seconds=2.6):
+    """One-shot: a tree torching - a deep rushing whoosh as the crown goes up, with a burst of crackle."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, seconds, n)
+    env = np.minimum(t / 0.18, 1) * np.exp(-np.maximum(t - 0.18, 0) * 1.6)
+    rush = _wf_bandpass(rng.standard_normal(n), 60, 900) * env
+    hiss = _wf_bandpass(rng.standard_normal(n), 900, 5000) * env * 0.25
+    clicks = np.zeros(n)
+    for _ in range(90):
+        at = int(rng.integers(0, int(n * 0.6)))
+        length = int(rng.integers(60, 700))
+        clicks[at:at + length] += rng.standard_normal(min(length, n - at)) * np.exp(-np.linspace(0, 8, min(length, n - at))) * rng.random() ** 2
+    x = rush * 1.4 + hiss + _wf_bandpass(clicks, 700, 9000) * 0.6 * env
+    return _wf_normalize(x, 0.9)
+
+
+def fire_whirl(rng, seconds=6.0):
+    """Loop: a fire whirl - jet-like roar whose brightness pulses as the vortex rotates."""
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    low = _wf_fast_lowpass(rng.standard_normal(n), 300)
+    mid = _wf_bandpass(rng.standard_normal(n), 300, 1600)
+    high = _wf_bandpass(rng.standard_normal(n), 1600, 6000)
+    rot = 0.5 + 0.5 * np.sin(2 * np.pi * (4.0 + 1.5 * _wf_smooth_noise(n, 0.5, rng)) * t)  # rotation pulse
+    x = low * 1.2 + mid * (0.35 + 0.45 * rot) + high * (0.08 + 0.2 * rot)
+    x *= 0.75 + 0.25 * _wf_smooth_noise(n, 0.8, rng)
+    return _wf_normalize(_wf_loopable(x), 0.85)
+
+
+def write_wildfire():
+    # separate seed so adding sounds never changes the existing files
+    rng = np.random.default_rng(4321)
+    write_ogg("wildfire_crackle", fire_crackle(rng))
+    write_ogg("wildfire_roar", fire_roar(rng))
+    write_ogg("wildfire_distant", fire_distant(rng))
+    for i in range(1, 4):
+        write_ogg(f"wildfire_pop{i}", fire_pop(rng))
+    write_ogg("wildfire_whoosh", fire_whoosh(rng))
+    write_ogg("wildfire_whirl", fire_whirl(rng))
+
+
+def volcano_rumble(rng, seconds=9.0):
+    """Close volcano layer: deep roar of the vent with lava gurgles and rock crackle."""
+    n = int(seconds * RATE)
+    roar = fast_lowpass(rng.standard_normal(n), 160) * 1.8
+    body = bandpass(rng.standard_normal(n), 120, 600) * 0.4 * (0.5 + 0.5 * smooth_noise(n, 1.5, rng))
+    # gurgles: short low-pitched bubbles at random times
+    gurgle = np.zeros(n)
+    t = np.arange(int(0.25 * RATE)) / RATE
+    for _ in range(int(seconds * 3)):
+        start = rng.integers(0, n - len(t))
+        f = rng.uniform(40, 90)
+        gurgle[start:start + len(t)] += np.sin(2 * np.pi * f * t * (1 + t * 2)) * np.exp(-t * 14) * rng.uniform(0.3, 0.8)
+    crackle = bandpass(rng.standard_normal(n), 1500, 4500) * (rng.random(n) < 0.002) * 3.0
+    surge = 0.6 + 0.4 * smooth_noise(n, 0.6, rng)
+    x = (roar + body + gurgle * 0.6 + crackle * 0.15) * surge
+    return normalize(loopable(x))
+
+
+def volcano_distant(rng, seconds=10.0):
+    """Far volcano layer: very deep, pulsing sub-rumble."""
+    n = int(seconds * RATE)
+    brown = np.cumsum(rng.standard_normal(n))
+    brown -= fast_lowpass(brown, 6)
+    x = fast_lowpass(brown, 70)
+    x *= 0.55 + 0.45 * smooth_noise(n, 0.9, rng)
+    return normalize(loopable(x), 0.9)
+
+
+def volcano_blast(rng, seconds=5.0):
+    """Eruption blast: sharp broadband crack, then a long low boom and rolling tail."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, seconds, n)
+    crack = bandpass(rng.standard_normal(n), 200, 6000) * np.exp(-t * 18)
+    boom = fast_lowpass(rng.standard_normal(n), 90) * 3.0 * np.minimum(t / 0.02, 1) * np.exp(-t * 1.4)
+    roll = fast_lowpass(rng.standard_normal(n), 250) * np.exp(-t * 0.9) * (0.4 + 0.6 * smooth_noise(n, 3, rng)) * 0.8
+    return normalize(crack * 0.7 + boom + roll, 0.95)
+
+
+def bomb_impact(rng, seconds=1.6):
+    """Lava bomb landing: heavy thud plus a hiss of steam."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, seconds, n)
+    thud = fast_lowpass(rng.standard_normal(n), 150) * 2.5 * np.exp(-t * 9)
+    hiss = bandpass(rng.standard_normal(n), 2500, 9000) * np.minimum(t / 0.05, 1) * np.exp(-t * 2.5) * 0.35
+    return normalize(thud + hiss, 0.9)
+
+
+def crackle(n, rng, rate, decay=None):
+    """Sparse clicks (burning / falling debris), optionally thinning out over time."""
+    x = np.zeros(n)
+    t = np.linspace(0, 1, n)
+    p = rate / RATE * (np.exp(-t * decay) if decay else np.ones(n))
+    hits = rng.random(n) < p
+    x[hits] = rng.standard_normal(hits.sum())
+    return bandpass(np.convolve(x, np.exp(-np.arange(200) / 30.0), mode="same"), 800, 6000)
+
+
+def meteor_whoosh(rng, seconds=3.4):
+    """Close layer: a rushing, rising roar that sweeps up in pitch as the fireball closes in, with fire crackle."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, 1, n)
+    white = rng.standard_normal(n)
+    low = bandpass(white, 120, 700)
+    high = bandpass(rng.standard_normal(n), 900, 4200)
+    sweep = t ** 1.6                      # crossfade low rush -> bright hiss
+    x = low * (1 - sweep) * 1.4 + high * sweep * 0.8
+    x += fast_lowpass(rng.standard_normal(n), 90) * 1.2 * t   # rumble builds underneath
+    x += crackle(n, rng, 60) * 0.25
+    env = np.minimum(t / 0.5, 1) ** 2 * (0.35 + 0.65 * t ** 1.5)
+    return normalize(x * env)
+
+
+def meteor_whoosh_distant(rng, seconds=3.6):
+    """Far layer: soft, airy rush that swells and fades (no highs, they don't carry)."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, 1, n)
+    x = bandpass(rng.standard_normal(n), 80, 650) + fast_lowpass(rng.standard_normal(n), 120) * 0.6
+    env = np.sin(np.pi * np.minimum(t * 1.15, 1)) ** 1.5 * (0.75 + 0.25 * smooth_noise(n, 2, rng))
+    return normalize(x * env, 0.75)
+
+
+def meteor_impact(rng, seconds=4.0):
+    """Close impact: hard crack, a deep falling boom, then a tail of rumble and pattering debris."""
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    crack = rng.standard_normal(n) * np.exp(-t / 0.018)
+    freq = 34 + 46 * np.exp(-t / 0.35)    # 80 Hz falling to ~34 Hz
+    boom = np.sin(2 * np.pi * np.cumsum(freq) / RATE) * np.exp(-t / 0.9)
+    body = fast_lowpass(rng.standard_normal(n), 220) * np.exp(-t / 0.6) * 3
+    tail = fast_lowpass(rng.standard_normal(n), 120) * np.exp(-t / 1.6) * (0.6 + 0.4 * smooth_noise(n, 3, rng)) * 2
+    debris = crackle(n, rng, 120, decay=2.5) * np.minimum(t / 0.3, 1) * 0.5
+    x = crack * 0.9 + boom * 1.2 + body + tail + debris
+    return normalize(x, 0.95)
+
+
+def meteor_impact_distant(rng, seconds=5.5):
+    """Far impact: muffled thump with a long rolling echo, like distant artillery."""
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    freq = 30 + 25 * np.exp(-t / 0.4)
+    boom = np.sin(2 * np.pi * np.cumsum(freq) / RATE) * np.exp(-t / 1.0)
+    roll = fast_lowpass(rng.standard_normal(n), 140) * np.exp(-t / 1.8) * (0.5 + 0.5 * smooth_noise(n, 2.5, rng)) * 3
+    env = np.minimum(t / 0.03, 1)
+    return normalize((boom + roll) * env, 0.9)
+
+
+def meteor(rng=None):
+    rng = rng or np.random.default_rng(4321)
+    for i in range(1, 3):
+        write_ogg(f"meteor_whoosh{i}", meteor_whoosh(rng))
+        write_ogg(f"meteor_whoosh_distant{i}", meteor_whoosh_distant(rng))
+        write_ogg(f"meteor_impact{i}", meteor_impact(rng))
+        write_ogg(f"meteor_impact_distant{i}", meteor_impact_distant(rng))
+
+
+def crackles(rng, n, rate, sharp=0.004):
+    """Random short broadband impulses (snapping wood, tumbling debris) at roughly `rate` per second."""
+    out = np.zeros(n)
+    count = int(n / RATE * rate)
+    for _ in range(count):
+        start = rng.integers(0, n - int(0.2 * RATE))
+        length = int(rng.uniform(0.01, 0.12) * RATE)
+        t = np.arange(length) / RATE
+        burst = rng.standard_normal(length) * np.exp(-t / rng.uniform(sharp, sharp * 6)) * rng.uniform(0.2, 1.0)
+        out[start:start + length] += burst
+    return out
+
+
+def tsunami_roar(rng, seconds=8.0):
+    """Close layer: the bore as heard in real footage - a deep, continuous roar of churning water, with grinding
+    and cracking debris tumbling in it, and irregular surges."""
+    n = int(seconds * RATE)
+    low = fast_lowpass(rng.standard_normal(n), 160) * 2.0
+    body = bandpass(rng.standard_normal(n), 250, 1200) * 0.6
+    hiss = bandpass(rng.standard_normal(n), 1500, 6000) * 0.18 * (0.5 + 0.5 * smooth_noise(n, 7, rng))
+    grind = bandpass(crackles(rng, n, 30, 0.01), 300, 3000) * 0.5          # dull knocks of debris
+    crack = bandpass(crackles(rng, n, 6, 0.003), 1200, 7000) * 0.35         # occasional sharp snaps
+    surge = 0.55 + 0.45 * smooth_noise(n, 1.2, rng)
+    x = (low + body + hiss + grind) * surge + crack
+    return normalize(loopable(x))
+
+
+def tsunami_surf(rng, seconds=12.0):
+    """Distant layer: heavy surf - slow swells that break into a hiss, over a low ocean rumble."""
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    rumble = fast_lowpass(rng.standard_normal(n), 160)
+    wash = bandpass(rng.standard_normal(n), 400, 3500)
+    # three swells per loop with slightly irregular shapes (period divides the loop so it stays seamless)
+    phase = (t / seconds * 3.0) % 1.0
+    swell = np.clip(np.sin(np.pi * phase) ** 3 * (0.75 + 0.25 * smooth_noise(n, 2, rng)), 0, 1)
+    x = rumble * (0.6 + 0.4 * swell) + wash * swell * 0.45
+    return normalize(loopable(x, 0.8), 0.85)
+
+
+def tsunami_crash(rng, seconds=3.5):
+    """One-shot: water slamming into something - low thump, broadband crash, splintering wood, seething tail."""
+    n = int(seconds * RATE)
+    t = np.linspace(0, seconds, n)
+    thump = fast_lowpass(rng.standard_normal(n), 90) * np.exp(-t * 4) * 2.0
+    crash = bandpass(rng.standard_normal(n), 200, 6000)
+    env = np.minimum(t / 0.04, 1) * np.exp(-t * 1.3) * (0.7 + 0.3 * smooth_noise(n, 12, rng))
+    seethe = bandpass(rng.standard_normal(n), 2500, 8000) * np.minimum(t / 0.3, 1) * np.exp(-t * 0.9) * 0.25
+    splinter = bandpass(crackles(rng, n, 25, 0.003), 900, 7000) * np.exp(-t * 2.0) * 0.6
+    return normalize(thump + crash * env + seethe + splinter)
+
+
+def tsunami_main():
+    rng = np.random.default_rng(5678)
+    write_ogg("tsunami_roar", tsunami_roar(rng))
+    write_ogg("tsunami_surf", tsunami_surf(rng))
+    for i in range(1, 4):
+        write_ogg(f"tsunami_crash{i}", tsunami_crash(rng))
+
+
+def blizzard_howl(rng, seconds=10.0):
+    """Close blizzard layer: rushing mid-band noise with wind howling through gaps (resonances that wander in
+    pitch) and fine snow hiss on top, surging with the gusts."""
+    n = int(seconds * RATE)
+    rush = band(rng.standard_normal(n), 300, 2600) * curve(n, 0.9, rng, 0.5, 1.0)
+    howl = sweep_band(rng.standard_normal(n), curve(n, 0.35, rng, 450, 1100), 14) * curve(n, 0.6, rng, 0.2, 1.0)
+    moan = sweep_band(rng.standard_normal(n), curve(n, 0.25, rng, 280, 520), 10) * curve(n, 0.5, rng, 0.0, 0.8)
+    hiss = band(rng.standard_normal(n), 3000, 7000) * curve(n, 4, rng, 0.0, 1.0)
+    x = normalize(rush) * 0.8 + normalize(howl) * 0.55 + normalize(moan) * 0.35 + normalize(hiss) * 0.12
+    return normalize(loopable(x, 0.8))
+
+
+def blizzard_distant(rng, seconds=12.0):
+    """Far blizzard layer: a low moaning wind with slow surges."""
+    n = int(seconds * RATE)
+    low = lowpass(rng.standard_normal(n), 260)
+    moan = sweep_band(rng.standard_normal(n), curve(n, 0.25, rng, 170, 300), 10)
+    x = (normalize(low) + normalize(moan) * 0.4) * curve(n, 0.4, rng, 0.55, 1.0)
+    return normalize(loopable(x, 1.0), 0.85)
+
+
+def sandstorm_howl(rng, seconds=10.0):
+    """Close sandstorm layer: dry hissing grit over a roaring rush, sparse grain crackle, barely tonal."""
+    n = int(seconds * RATE)
+    roar = lowpass(rng.standard_normal(n), 500)
+    grit = band(rng.standard_normal(n), 2200, 8000) * curve(n, 2.5, rng, 0.2, 1.0)
+    crackle = band(rng.standard_normal(n) * (rng.random(n) < 0.02), 3000, 9000)
+    whistle = sweep_band(rng.standard_normal(n), curve(n, 0.3, rng, 280, 420), 8)
+    surge = curve(n, 0.8, rng, 0.5, 1.0)
+    x = (normalize(roar) * 1.0 + normalize(grit) * 0.4 + normalize(crackle) * 0.25 + normalize(whistle) * 0.08) * surge
+    return normalize(loopable(x, 0.8))
+
+
+def sandstorm_distant(rng, seconds=12.0):
+    """Far sandstorm layer: a deep dull roar, like a wall of wind rolling closer."""
+    n = int(seconds * RATE)
+    x = normalize(lowpass(brown(n, rng), 220)) + normalize(lowpass(rng.standard_normal(n), 600)) * 0.15
+    x *= curve(n, 0.5, rng, 0.65, 1.0)
+    return normalize(loopable(x, 1.0), 0.9)
+
+
+# --- original helpers (removed in the tornado sound rework, still used by other disasters' generators)
+
+def fast_lowpass(x, cutoff):
+    """Vectorised FFT low-pass for long buffers."""
+    spec = np.fft.rfft(x)
+    freqs = np.fft.rfftfreq(len(x), 1 / RATE)
+    spec *= 1 / (1 + (freqs / cutoff) ** 4)
+    return np.fft.irfft(spec, len(x))
+
+
+def bandpass(x, lo, hi):
+    spec = np.fft.rfft(x)
+    freqs = np.fft.rfftfreq(len(x), 1 / RATE)
+    spec *= (1 / (1 + (lo / np.maximum(freqs, 1)) ** 4)) * (1 / (1 + (freqs / hi) ** 4))
+    return np.fft.irfft(spec, len(x))
+
+
+def smooth_noise(n, rate_hz, rng):
+    """Slow random modulation curve in 0..1."""
+    pts = max(4, int(n / RATE * rate_hz) + 2)
+    ctrl = rng.random(pts)
+    xs = np.linspace(0, pts - 1, n)
+    return np.interp(xs, np.arange(pts), ctrl)
+
+
+def _main_1():
     rng = np.random.default_rng(1234)
     write_ogg("tornado_distant", tornado_distant(rng))
     write_ogg("tornado_roar", tornado_roar(rng))
@@ -255,6 +717,119 @@ def main():
         write_ogg(f"debris_thud{i}", debris_thud(rng))
         write_ogg(f"wood_snap{i}", wood_snap(rng))
         write_ogg(f"debris_rattle{i}", debris_rattle(rng))
+
+
+def _main_2():
+    rng = np.random.default_rng(1234)
+    write_ogg("tornado_distant", tornado_distant(rng))
+    write_ogg("tornado_roar", tornado_roar(rng))
+    write_ogg("tornado_core", tornado_core(rng))
+    write_ogg("wind_howl", wind_howl(rng))
+    for i in range(1, 4):
+        write_ogg(f"rumble{i}", thunder(rng))
+        write_ogg(f"wind_gust{i}", gust(rng))
+        write_ogg(f"debris_thud{i}", debris_thud(rng))
+        write_ogg(f"wood_snap{i}", wood_snap(rng))
+        write_ogg(f"debris_rattle{i}", debris_rattle(rng))
+    earthquake_sounds()
+    earthquake_cinematic_sounds()
+
+
+def _main_3():
+    rng = np.random.default_rng(1234)
+    write_ogg("tornado_distant", tornado_distant(rng))
+    write_ogg("tornado_roar", tornado_roar(rng))
+    write_ogg("tornado_core", tornado_core(rng))
+    write_ogg("wind_howl", wind_howl(rng))
+    for i in range(1, 4):
+        write_ogg(f"rumble{i}", thunder(rng))
+        write_ogg(f"wind_gust{i}", gust(rng))
+        write_ogg(f"debris_thud{i}", debris_thud(rng))
+        write_ogg(f"wood_snap{i}", wood_snap(rng))
+        write_ogg(f"debris_rattle{i}", debris_rattle(rng))
+    write_wildfire()
+
+
+def _main_4():
+    rng = np.random.default_rng(1234)
+    write_ogg("tornado_distant", tornado_distant(rng))
+    write_ogg("tornado_roar", tornado_roar(rng))
+    write_ogg("tornado_core", tornado_core(rng))
+    write_ogg("wind_howl", wind_howl(rng))
+    for i in range(1, 4):
+        write_ogg(f"rumble{i}", thunder(rng))
+        write_ogg(f"wind_gust{i}", gust(rng))
+        write_ogg(f"debris_thud{i}", debris_thud(rng))
+        write_ogg(f"wood_snap{i}", wood_snap(rng))
+        write_ogg(f"debris_rattle{i}", debris_rattle(rng))
+
+    vrng = np.random.default_rng(4321)  # separate stream so the tornado sounds stay byte-identical
+    write_ogg("volcano_rumble", volcano_rumble(vrng))
+    write_ogg("volcano_distant", volcano_distant(vrng))
+    for i in range(1, 4):
+        write_ogg(f"volcano_blast{i}", volcano_blast(vrng))
+    for i in range(1, 3):
+        write_ogg(f"bomb_impact{i}", bomb_impact(vrng))
+
+
+def _main_5():
+    rng = np.random.default_rng(1234)
+    write_ogg("tornado_distant", tornado_distant(rng))
+    write_ogg("tornado_roar", tornado_roar(rng))
+    write_ogg("tornado_core", tornado_core(rng))
+    write_ogg("wind_howl", wind_howl(rng))
+    for i in range(1, 4):
+        write_ogg(f"rumble{i}", thunder(rng))
+        write_ogg(f"wind_gust{i}", gust(rng))
+        write_ogg(f"debris_thud{i}", debris_thud(rng))
+        write_ogg(f"wood_snap{i}", wood_snap(rng))
+        write_ogg(f"debris_rattle{i}", debris_rattle(rng))
+    meteor()
+
+
+def _main_6():
+    rng = np.random.default_rng(1234)
+    write_ogg("tornado_distant", tornado_distant(rng))
+    write_ogg("tornado_roar", tornado_roar(rng))
+    write_ogg("tornado_core", tornado_core(rng))
+    write_ogg("wind_howl", wind_howl(rng))
+    for i in range(1, 4):
+        write_ogg(f"rumble{i}", thunder(rng))
+        write_ogg(f"wind_gust{i}", gust(rng))
+        write_ogg(f"debris_thud{i}", debris_thud(rng))
+        write_ogg(f"wood_snap{i}", wood_snap(rng))
+        write_ogg(f"debris_rattle{i}", debris_rattle(rng))
+    tsunami_main()
+
+
+def _main_7():
+    rng = np.random.default_rng(1234)
+    write_ogg("tornado_distant", tornado_distant(rng))
+    write_ogg("tornado_roar", tornado_roar(rng))
+    write_ogg("tornado_core", tornado_core(rng))
+    write_ogg("wind_howl", wind_howl(rng))
+    for i in range(1, 4):
+        write_ogg(f"rumble{i}", thunder(rng))
+        write_ogg(f"wind_gust{i}", gust(rng))
+        write_ogg(f"debris_thud{i}", debris_thud(rng))
+        write_ogg(f"wood_snap{i}", wood_snap(rng))
+        write_ogg(f"debris_rattle{i}", debris_rattle(rng))
+    storm_rng = np.random.default_rng(5678)  # separate stream: older sounds stay byte-identical
+    write_ogg("blizzard_howl", blizzard_howl(storm_rng))
+    write_ogg("blizzard_distant", blizzard_distant(storm_rng))
+    write_ogg("sandstorm_howl", sandstorm_howl(storm_rng))
+    write_ogg("sandstorm_distant", sandstorm_distant(storm_rng))
+
+
+def main():
+    # each merged branch's original entry point (deterministic, so shared steps can repeat safely)
+    _main_1()
+    _main_2()
+    _main_3()
+    _main_4()
+    _main_5()
+    _main_6()
+    _main_7()
 
 
 if __name__ == "__main__":

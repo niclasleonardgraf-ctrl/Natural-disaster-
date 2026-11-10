@@ -33,14 +33,18 @@ displayName="${mod_name}" #mandatory
 logoFile="realisticdisasters_logo.png"
 
 # A text field displayed in the mod UI
-#credits="" #optional
+credits="All textures, sounds and code are original. Sounds and textures are generated procedurally (CC0)."
 
 # The authors of the mod, displayed in the mod UI (optional)
 authors="Realistic Disasters contributors"
 
 # The description text for the mod (multi line!) (#mandatory)
 description='''
-Cinematic, Minecraft-styled natural disasters: tornadoes, earthquakes, wildfires and more.
+Cinematic, realistic natural disasters for Minecraft: tornadoes, earthquakes, wildfires, volcanoes, meteor showers, tsunamis, blizzards and sandstorms.
+
+Disasters form naturally by biome, or you can summon them with the Disaster Controller: right-click it, pick a disaster and an intensity, and press Start. No commands needed.
+
+Each disaster has warning signs, real physics, layered sound and lasting damage, with intensity levels from Weak to Catastrophic. Everything can be configured in-game.
 '''
 
 # The [[mixins]] block allows you to declare your mixin config to FML so that it gets loaded.

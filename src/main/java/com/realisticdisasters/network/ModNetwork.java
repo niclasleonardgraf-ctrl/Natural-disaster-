@@ -14,6 +14,8 @@ public final class ModNetwork {
         PayloadRegistrar registrar = event.registrar(VERSION).optional();
         registrar.playToClient(DisasterSyncPayload.TYPE, DisasterSyncPayload.CODEC);
         registrar.playToClient(DisasterRemovePayload.TYPE, DisasterRemovePayload.CODEC);
+        registrar.playToServer(ControlPayloads.Start.TYPE, ControlPayloads.Start.CODEC, ControlPayloads::handleStart);
+        registrar.playToServer(ControlPayloads.Stop.TYPE, ControlPayloads.Stop.CODEC, ControlPayloads::handleStop);
     }
 
     private ModNetwork() {}

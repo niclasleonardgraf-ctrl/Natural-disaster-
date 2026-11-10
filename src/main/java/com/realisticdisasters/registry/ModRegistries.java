@@ -1,6 +1,14 @@
 package com.realisticdisasters.registry;
 
 import com.realisticdisasters.RealisticDisasters;
+import com.realisticdisasters.disaster.volcano.AshLayerBlock;
+import com.realisticdisasters.disaster.volcano.LavaBombEntity;
+import net.minecraft.world.level.block.SnowLayerBlock;
+import net.minecraft.world.level.block.SoundType;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.material.MapColor;
+import net.minecraft.world.level.material.PushReaction;
+import net.neoforged.neoforge.registries.DeferredBlock;
 import net.minecraft.core.particles.ParticleType;
 import net.minecraft.core.particles.SimpleParticleType;
 import net.minecraft.core.registries.Registries;
@@ -8,13 +16,45 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.world.damagesource.DamageType;
+import com.realisticdisasters.disaster.wildfire.CharredLogBlock;
+import com.realisticdisasters.disaster.wildfire.ScorchedEarthBlock;
+import com.realisticdisasters.disaster.wildfire.WildfireFlameBlock;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.level.block.SoundType;
+import net.minecraft.world.level.block.state.properties.NoteBlockInstrument;
+import net.minecraft.world.level.material.MapColor;
+import net.minecraft.world.level.material.PushReaction;
+import net.neoforged.neoforge.registries.DeferredBlock;
+import net.neoforged.neoforge.registries.DeferredItem;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.MobCategory;
 import net.neoforged.bus.api.IEventBus;
+import com.realisticdisasters.block.SandLayerBlock;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.CreativeModeTabs;
+import net.minecraft.world.level.block.SoundType;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.material.MapColor;
+import net.minecraft.world.level.material.PushReaction;
+import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
+import net.neoforged.neoforge.registries.DeferredBlock;
+import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
 public final class ModRegistries {
     public static final DeferredRegister<SoundEvent> SOUNDS = DeferredRegister.create(Registries.SOUND_EVENT, RealisticDisasters.MODID);
     public static final DeferredRegister<ParticleType<?>> PARTICLES = DeferredRegister.create(Registries.PARTICLE_TYPE, RealisticDisasters.MODID);
+    public static final DeferredRegister.Blocks BLOCKS = DeferredRegister.createBlocks(RealisticDisasters.MODID);
+    public static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(RealisticDisasters.MODID);
+    public static final DeferredRegister<net.minecraft.world.item.CreativeModeTab> TABS =
+            DeferredRegister.create(Registries.CREATIVE_MODE_TAB, RealisticDisasters.MODID);
+
+    public static final DeferredItem<com.realisticdisasters.item.DisasterControllerItem> DISASTER_CONTROLLER =
+            ITEMS.registerItem("disaster_controller", com.realisticdisasters.item.DisasterControllerItem::new,
+                    p -> p.stacksTo(1).rarity(net.minecraft.world.item.Rarity.EPIC));
+
 
     // Sounds (all original, synthesized by tools/gen_sounds.py)
     public static final DeferredHolder<SoundEvent, SoundEvent> TORNADO_ROAR = sound("disaster.tornado.roar");
@@ -26,6 +66,32 @@ public final class ModRegistries {
     public static final DeferredHolder<SoundEvent, SoundEvent> DEBRIS_THUD = sound("disaster.debris_thud");
     public static final DeferredHolder<SoundEvent, SoundEvent> WOOD_SNAP = sound("disaster.wood_snap");
     public static final DeferredHolder<SoundEvent, SoundEvent> DEBRIS_RATTLE = sound("disaster.debris_rattle");
+    public static final DeferredHolder<SoundEvent, SoundEvent> QUAKE_RUMBLE = sound("disaster.earthquake.rumble");
+    public static final DeferredHolder<SoundEvent, SoundEvent> QUAKE_DISTANT = sound("disaster.earthquake.distant");
+    public static final DeferredHolder<SoundEvent, SoundEvent> QUAKE_CRACK = sound("disaster.earthquake.crack");
+    public static final DeferredHolder<SoundEvent, SoundEvent> QUAKE_BOOM = sound("disaster.earthquake.boom");
+    public static final DeferredHolder<SoundEvent, SoundEvent> COLLAPSE_CRASH = sound("disaster.earthquake.collapse");
+    public static final DeferredHolder<SoundEvent, SoundEvent> WILDFIRE_CRACKLE = sound("disaster.wildfire.crackle");
+    public static final DeferredHolder<SoundEvent, SoundEvent> WILDFIRE_ROAR = sound("disaster.wildfire.roar");
+    public static final DeferredHolder<SoundEvent, SoundEvent> WILDFIRE_DISTANT = sound("disaster.wildfire.distant");
+    public static final DeferredHolder<SoundEvent, SoundEvent> WILDFIRE_POP = sound("disaster.wildfire.pop");
+    public static final DeferredHolder<SoundEvent, SoundEvent> WILDFIRE_WHOOSH = sound("disaster.wildfire.whoosh");
+    public static final DeferredHolder<SoundEvent, SoundEvent> WILDFIRE_WHIRL = sound("disaster.wildfire.whirl");
+    public static final DeferredHolder<SoundEvent, SoundEvent> VOLCANO_RUMBLE = sound("disaster.volcano.rumble");
+    public static final DeferredHolder<SoundEvent, SoundEvent> VOLCANO_DISTANT = sound("disaster.volcano.distant");
+    public static final DeferredHolder<SoundEvent, SoundEvent> VOLCANO_BLAST = sound("disaster.volcano.blast");
+    public static final DeferredHolder<SoundEvent, SoundEvent> LAVA_BOMB_IMPACT = sound("disaster.volcano.bomb_impact");
+    public static final DeferredHolder<SoundEvent, SoundEvent> METEOR_WHOOSH = sound("disaster.meteor.whoosh");
+    public static final DeferredHolder<SoundEvent, SoundEvent> METEOR_WHOOSH_DISTANT = sound("disaster.meteor.whoosh_distant");
+    public static final DeferredHolder<SoundEvent, SoundEvent> METEOR_IMPACT = sound("disaster.meteor.impact");
+    public static final DeferredHolder<SoundEvent, SoundEvent> METEOR_IMPACT_DISTANT = sound("disaster.meteor.impact_distant");
+    public static final DeferredHolder<SoundEvent, SoundEvent> TSUNAMI_ROAR = sound("disaster.tsunami.roar");
+    public static final DeferredHolder<SoundEvent, SoundEvent> TSUNAMI_SURF = sound("disaster.tsunami.surf");
+    public static final DeferredHolder<SoundEvent, SoundEvent> TSUNAMI_CRASH = sound("disaster.tsunami.crash");
+    public static final DeferredHolder<SoundEvent, SoundEvent> BLIZZARD_HOWL = sound("disaster.blizzard.howl");
+    public static final DeferredHolder<SoundEvent, SoundEvent> BLIZZARD_DISTANT = sound("disaster.blizzard.distant");
+    public static final DeferredHolder<SoundEvent, SoundEvent> SANDSTORM_HOWL = sound("disaster.sandstorm.howl");
+    public static final DeferredHolder<SoundEvent, SoundEvent> SANDSTORM_DISTANT = sound("disaster.sandstorm.distant");
 
     // Particles
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FUNNEL_CLOUD =
@@ -46,10 +112,127 @@ public final class ModRegistries {
             PARTICLES.register("rain_shaft", () -> new SimpleParticleType(true));
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> DUST_CLOUD =
             PARTICLES.register("dust_cloud", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> QUAKE_DUST =
+            PARTICLES.register("quake_dust", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> COLLAPSE_DUST =
+            PARTICLES.register("collapse_dust", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> WILDFIRE_SMOKE =
+            PARTICLES.register("wildfire_smoke", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> ASH_FLAKE =
+            PARTICLES.register("ash_flake", () -> new SimpleParticleType(false));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> EMBER =
+            PARTICLES.register("ember", () -> new SimpleParticleType(false));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> SMOKE_BILLOW =
+            PARTICLES.register("smoke_billow", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> SMOKE_PALL =
+            PARTICLES.register("smoke_pall", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> SMOLDER_SMOKE =
+            PARTICLES.register("smolder_smoke", () -> new SimpleParticleType(false));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FIRE_TONGUE =
+            PARTICLES.register("fire_tongue", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FIRE_WHIRL =
+            PARTICLES.register("fire_whirl", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> WHIRL_SMOKE =
+            PARTICLES.register("whirl_smoke", () -> new SimpleParticleType(true));
+
+    // Blocks
+    /** Short-lived flame the wildfire places; burns out by itself and never spreads (the disaster drives spread). */
+    public static final DeferredBlock<WildfireFlameBlock> WILDFIRE_FLAME = BLOCKS.registerBlock("wildfire_flame",
+            WildfireFlameBlock::new, p -> p.mapColor(MapColor.FIRE).replaceable().noCollision().instabreak()
+                    .lightLevel(s -> 15).sound(SoundType.WOOL).pushReaction(PushReaction.DESTROY).noLootTable());
+    /** What a burnt tree trunk turns into. */
+    public static final DeferredBlock<CharredLogBlock> CHARRED_LOG = BLOCKS.registerBlock("charred_log",
+            CharredLogBlock::new, p -> p.mapColor(MapColor.COLOR_BLACK).instrument(NoteBlockInstrument.BASS)
+                    .strength(1.5f).sound(SoundType.WOOD));
+    public static final DeferredItem<BlockItem> CHARRED_LOG_ITEM = ITEMS.registerSimpleBlockItem(CHARRED_LOG);
+    /** Burnt ground: char and ash over dirt. */
+    public static final DeferredBlock<ScorchedEarthBlock> SCORCHED_EARTH = BLOCKS.registerBlock("scorched_earth",
+            ScorchedEarthBlock::new, p -> p.mapColor(MapColor.COLOR_BLACK).strength(0.5f).sound(SoundType.GRAVEL));
+    public static final DeferredItem<BlockItem> SCORCHED_EARTH_ITEM = ITEMS.registerSimpleBlockItem(SCORCHED_EARTH);
+    /** Heat-killed, rust-brown foliage left on trees the fire only scorched. */
+    public static final DeferredBlock<Block> SCORCHED_LEAVES = BLOCKS.registerSimpleBlock("scorched_leaves",
+            p -> p.mapColor(MapColor.COLOR_BROWN).strength(0.2f).sound(SoundType.GRASS).noOcclusion()
+                    .isValidSpawn((st, l, pos, type) -> false).isSuffocating((st, l, pos) -> false)
+                    .isViewBlocking((st, l, pos) -> false).isRedstoneConductor((st, l, pos) -> false)
+                    .pushReaction(PushReaction.DESTROY));
+    public static final DeferredItem<BlockItem> SCORCHED_LEAVES_ITEM = ITEMS.registerSimpleBlockItem(SCORCHED_LEAVES);
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> ASH_CLOUD =
+            PARTICLES.register("ash_cloud", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> ASH_FALL =
+            PARTICLES.register("ash_fall", () -> new SimpleParticleType(false));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> ASH_TRAIL =
+            PARTICLES.register("ash_trail", () -> new SimpleParticleType(false));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> ASH_CURTAIN =
+            PARTICLES.register("ash_curtain", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> LAVA_SPARK =
+            PARTICLES.register("lava_spark", () -> new SimpleParticleType(false));
+
+    // Blocks
+    // (shares the BLOCKS register declared above)
+    public static final DeferredBlock<AshLayerBlock> VOLCANIC_ASH = BLOCKS.registerBlock("volcanic_ash", AshLayerBlock::new,
+            () -> BlockBehaviour.Properties.of().mapColor(MapColor.COLOR_GRAY).replaceable().forceSolidOff()
+                    .strength(0.2f).sound(SoundType.SAND).pushReaction(PushReaction.DESTROY)
+                    .isViewBlocking((st, l, p) -> st.getValue(SnowLayerBlock.LAYERS) >= 8));
+
+    // Entities
+    public static final DeferredRegister.Entities ENTITY_TYPES = DeferredRegister.createEntities(RealisticDisasters.MODID);
+    public static final DeferredHolder<EntityType<?>, EntityType<LavaBombEntity>> LAVA_BOMB =
+            ENTITY_TYPES.registerEntityType("lava_bomb", LavaBombEntity::new, MobCategory.MISC,
+                    b -> b.sized(0.6f, 0.6f).clientTrackingRange(10).updateInterval(2).fireImmune().noSave().noLootTable());
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> METEOR_STREAK =
+            PARTICLES.register("meteor_streak", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> METEOR_FIREBALL =
+            PARTICLES.register("meteor_fireball", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> METEOR_EMBER =
+            PARTICLES.register("meteor_ember", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> METEOR_SMOKE =
+            PARTICLES.register("meteor_smoke", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> WAVE_FOAM =
+            PARTICLES.register("wave_foam", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> SEA_SPRAY =
+            PARTICLES.register("sea_spray", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> WAVE_WATER =
+            PARTICLES.register("wave_water", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FLOOD_DEBRIS =
+            PARTICLES.register("flood_debris", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> BLIZZARD_SNOW =
+            PARTICLES.register("blizzard_snow", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> SNOW_HAZE =
+            PARTICLES.register("snow_haze", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> SAND_GRAIN =
+            PARTICLES.register("sand_grain", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> SAND_HAZE =
+            PARTICLES.register("sand_haze", () -> new SimpleParticleType(true));
+
+    // Blocks left behind by sandstorms
+    public static final DeferredBlock<SandLayerBlock> SAND_LAYER = BLOCKS.registerBlock("sand_layer", SandLayerBlock::new,
+            p -> sandLayerProps(p, MapColor.SAND));
+    public static final DeferredBlock<SandLayerBlock> RED_SAND_LAYER = BLOCKS.registerBlock("red_sand_layer", SandLayerBlock::new,
+            p -> sandLayerProps(p, MapColor.COLOR_ORANGE));
+    public static final DeferredItem<BlockItem> SAND_LAYER_ITEM = ITEMS.registerSimpleBlockItem(SAND_LAYER);
+    public static final DeferredItem<BlockItem> RED_SAND_LAYER_ITEM = ITEMS.registerSimpleBlockItem(RED_SAND_LAYER);
 
     // Data-driven damage type (data/realisticdisasters/damage_type/tornado.json)
     public static final ResourceKey<DamageType> TORNADO_DAMAGE =
             ResourceKey.create(Registries.DAMAGE_TYPE, id("tornado"));
+    public static final ResourceKey<DamageType> EARTHQUAKE_DAMAGE =
+            ResourceKey.create(Registries.DAMAGE_TYPE, id("earthquake"));
+    public static final ResourceKey<DamageType> WILDFIRE_DAMAGE =
+            ResourceKey.create(Registries.DAMAGE_TYPE, id("wildfire"));
+    public static final ResourceKey<DamageType> VOLCANO_DAMAGE =
+            ResourceKey.create(Registries.DAMAGE_TYPE, id("volcano"));
+    public static final ResourceKey<DamageType> METEOR_DAMAGE =
+            ResourceKey.create(Registries.DAMAGE_TYPE, id("meteor"));
+    public static final ResourceKey<DamageType> TSUNAMI_DAMAGE =
+            ResourceKey.create(Registries.DAMAGE_TYPE, id("tsunami"));
+    public static final ResourceKey<DamageType> SANDSTORM_DAMAGE =
+            ResourceKey.create(Registries.DAMAGE_TYPE, id("sandstorm"));
+
+    private static BlockBehaviour.Properties sandLayerProps(BlockBehaviour.Properties p, MapColor color) {
+        return p.mapColor(color).replaceable().forceSolidOff().strength(0.2F).sound(SoundType.SAND)
+                .isViewBlocking((state, level, pos) -> state.getValue(SandLayerBlock.LAYERS) >= 8)
+                .pushReaction(PushReaction.DESTROY);
+    }
 
     private static DeferredHolder<SoundEvent, SoundEvent> sound(String name) {
         return SOUNDS.register(name, () -> SoundEvent.createVariableRangeEvent(id(name)));
@@ -59,9 +242,28 @@ public final class ModRegistries {
         return Identifier.fromNamespaceAndPath(RealisticDisasters.MODID, path);
     }
 
+    public static final net.neoforged.neoforge.registries.DeferredHolder<net.minecraft.world.item.CreativeModeTab, net.minecraft.world.item.CreativeModeTab> TAB =
+            TABS.register("main", () -> net.minecraft.world.item.CreativeModeTab.builder()
+                    .title(net.minecraft.network.chat.Component.translatable("itemGroup.realisticdisasters"))
+                    .icon(() -> DISASTER_CONTROLLER.get().getDefaultInstance())
+                    .displayItems((params, out) -> ITEMS.getEntries().forEach(e -> out.accept(e.get())))
+                    .build());
+
     public static void register(IEventBus modBus) {
         SOUNDS.register(modBus);
         PARTICLES.register(modBus);
+        BLOCKS.register(modBus);
+        ITEMS.register(modBus);
+        TABS.register(modBus);
+        ENTITY_TYPES.register(modBus);
+        modBus.addListener(ModRegistries::addToCreativeTabs);
+    }
+
+    private static void addToCreativeTabs(BuildCreativeModeTabContentsEvent event) {
+        if (event.getTabKey() == CreativeModeTabs.NATURAL_BLOCKS) {
+            event.accept(SAND_LAYER_ITEM.get());
+            event.accept(RED_SAND_LAYER_ITEM.get());
+        }
     }
 
     private ModRegistries() {}

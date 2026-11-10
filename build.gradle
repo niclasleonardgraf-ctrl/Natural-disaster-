@@ -60,6 +60,8 @@ neoForge {
             programArguments.addAll '--quickPlaySingleplayer', 'VisualTest', '--width', '1280', '--height', '720'
             systemProperty 'realisticdisasters.autostart', 'tornado,4,PEAK'
             systemProperty 'realisticdisasters.debug', 'true'
+            systemProperty 'realisticdisasters.openController', System.getProperty('openController', '0') == '0' ? '' : System.getProperty('openController')
+            systemProperty 'realisticdisasters.openActiveTab', System.getProperty('openActiveTab', 'false')
         }
 
         server {
