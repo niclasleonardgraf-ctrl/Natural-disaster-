@@ -7,21 +7,24 @@ Full design spec: [`docs/SPEC.md`](docs/SPEC.md).
 
 ## Status
 
-| Disaster | State |
-|---|---|
-| Tornado | ✅ complete |
-| Earthquake | ✅ complete |
-| Wildfire, Volcano, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
-| Wildfire | ✅ complete |
-| Earthquake, Volcano, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
-| Volcano | ✅ complete |
-| Earthquake, Wildfire, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
-| Meteor shower | ✅ complete |
-| Earthquake, Wildfire, Volcano, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
-| Tsunami/flood | ✅ complete |
-| Earthquake, Wildfire, Volcano, Meteor shower, Tsunami/flood, Blizzard/sandstorm | planned (next sessions, in this order) |
-| Blizzard / Sandstorm | ✅ complete (shared wind-storm base) |
-| Earthquake, Wildfire, Volcano, Meteor shower, Tsunami/flood | planned (next sessions, in this order) |
+All seven disasters are in this build (integrated from the per-disaster sessions):
+
+| Disaster | Command | State |
+|---|---|---|
+| Tornado | `/disaster start tornado 3` | ✅ |
+| Earthquake | `/disaster start earthquake 3` | ✅ |
+| Wildfire | `/disaster start wildfire 3` | ✅ |
+| Volcano | `/disaster start volcano 3` | ✅ |
+| Meteor shower | `/disaster start meteor_shower 3` | ✅ |
+| Tsunami / flood | `/disaster start tsunami 3` | ✅ |
+| Blizzard / Sandstorm | `/disaster start blizzard 3`, `/disaster start sandstorm 3` | ✅ (shared wind-storm base) |
+
+### Integration notes
+- 44 GameTests across all disasters (`./gradlew runGameTestServer`); every disaster stays below 1 ms/tick at
+  intensity 3. One blizzard test (`blizzard_buries_and_pushes`) is occasionally borderline (~1 in 8 runs).
+- The asset generators in `tools/` were rebuilt from all branches and run cleanly. Textures, structures and the
+  tornado sounds regenerate identically. The other disasters' sounds regenerate slightly differently (a shared helper
+  changed after they were made), so the committed sounds are the reference.
 
 ## Commands (op level 2)
 
