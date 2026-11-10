@@ -8,6 +8,7 @@ import com.realisticdisasters.disaster.Disaster;
 import com.realisticdisasters.disaster.DisasterManager;
 import com.realisticdisasters.disaster.DisasterType;
 import com.realisticdisasters.disaster.Phase;
+import com.realisticdisasters.disaster.tornado.TornadoDisaster;
 import com.realisticdisasters.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -52,7 +53,9 @@ public final class DisasterGameTests {
         add(event, "tornado_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_toggle")), 300);
         add(event, "tornado_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_perf")), 400);
         add(event, "tornado_shelter_protects", event.registerEnvironment(ModRegistries.id("env_shelter")), 300);
-        add(event, "tornado_breaks_glass_and_snaps_trees", event.registerEnvironment(ModRegistries.id("env_materials")), 400);
+        // Wind sampling hits a single ground-level block ~2 % of ticks, so allow enough ticks for a near-certain hit;
+        // the test still finishes as soon as both blocks have failed (typically < 100 ticks).
+        add(event, "tornado_breaks_glass_and_snaps_trees", event.registerEnvironment(ModRegistries.id("env_materials")), 800);
     }
 
     private static void add(RegisterGameTestsEvent event, String name, Holder<TestEnvironmentDefinition<?>> env, int maxTicks) {
@@ -172,16 +175,22 @@ public final class DisasterGameTests {
 
     /** Material failure: glass shatters and a tree trunk snaps near the funnel (leaving a stump). */
     private static void tornadoBreaksGlassAndSnapsTrees(GameTestHelper helper) {
-        BlockPos glass = new BlockPos(18, 4, 18);
+        // Both targets sit ~8 blocks from the funnel axis: the radius of maximum wind for intensity 4 (core radius
+        // 8.5). Closer in, the calm eye is dominated by updraft and a trunk barely exceeds its resistance.
+        BlockPos glass = new BlockPos(24, 4, 16);
+        int trunkX = 8, trunkZ = 16;
         helper.setBlock(glass, Blocks.GLASS);
-        for (int y = 4; y <= 8; y++) helper.setBlock(new BlockPos(14, y, 17), Blocks.OAK_LOG);
+        for (int y = 4; y <= 8; y++) helper.setBlock(new BlockPos(trunkX, y, trunkZ), Blocks.OAK_LOG);
         Disaster tornado = startPeakTornado(helper, 4);
+        // Hold the funnel over the arena: on its random track it can leave the arena (or head away from the
+        // targets) before the wind ever samples them.
+        ((TornadoDisaster) tornado).anchor();
         helper.succeedWhen(() -> {
             helper.assertTrue(!helper.getLevel().getBlockState(helper.absolutePos(glass)).is(Blocks.GLASS), "glass still intact");
             int logs = 0;
-            for (int y = 4; y <= 8; y++) if (helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(14, y, 17))).is(Blocks.OAK_LOG)) logs++;
+            for (int y = 4; y <= 8; y++) if (helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(trunkX, y, trunkZ))).is(Blocks.OAK_LOG)) logs++;
             // A snapped trunk leaves a stump: the top must be gone, the stump may stay.
-            helper.assertTrue(!helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(14, 8, 17))).is(Blocks.OAK_LOG)
+            helper.assertTrue(!helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(trunkX, 8, trunkZ))).is(Blocks.OAK_LOG)
                     && logs <= 3, "trunk not snapped (" + logs + " logs left)");
             DisasterManager.stop(helper.getLevel(), tornado.id(), false);
         });

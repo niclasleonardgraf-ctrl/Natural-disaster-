@@ -80,6 +80,7 @@ public class TornadoDisaster extends Disaster {
     private double heading;
     private double headingDrift;
     private double currentSpeed;
+    private boolean anchored;
     private boolean changedWeather;
 
     public TornadoDisaster(ServerLevel level, int id, Vec3 pos, int intensity) {
@@ -171,8 +172,16 @@ public class TornadoDisaster extends Disaster {
 
     // ------------------------------------------------------------------ movement
 
+    /**
+     * Holds the funnel where it is: it keeps its full wind field but stops travelling. Testing / admin use, so a
+     * test can expose blocks to a known part of the wind field instead of wherever the random track takes it.
+     */
+    public void anchor() {
+        anchored = true;
+    }
+
     private void move() {
-        if (phase() == Phase.WARNING) {
+        if (phase() == Phase.WARNING || anchored) {
             currentSpeed = 0.0;
             return;
         }
