@@ -680,6 +680,31 @@ def sandstorm_distant(rng, seconds=12.0):
     return normalize(loopable(x, 1.0), 0.9)
 
 
+# --- original helpers (removed in the tornado sound rework, still used by other disasters' generators)
+
+def fast_lowpass(x, cutoff):
+    """Vectorised FFT low-pass for long buffers."""
+    spec = np.fft.rfft(x)
+    freqs = np.fft.rfftfreq(len(x), 1 / RATE)
+    spec *= 1 / (1 + (freqs / cutoff) ** 4)
+    return np.fft.irfft(spec, len(x))
+
+
+def bandpass(x, lo, hi):
+    spec = np.fft.rfft(x)
+    freqs = np.fft.rfftfreq(len(x), 1 / RATE)
+    spec *= (1 / (1 + (lo / np.maximum(freqs, 1)) ** 4)) * (1 / (1 + (freqs / hi) ** 4))
+    return np.fft.irfft(spec, len(x))
+
+
+def smooth_noise(n, rate_hz, rng):
+    """Slow random modulation curve in 0..1."""
+    pts = max(4, int(n / RATE * rate_hz) + 2)
+    ctrl = rng.random(pts)
+    xs = np.linspace(0, pts - 1, n)
+    return np.interp(xs, np.arange(pts), ctrl)
+
+
 def _main_1():
     rng = np.random.default_rng(1234)
     write_ogg("tornado_distant", tornado_distant(rng))

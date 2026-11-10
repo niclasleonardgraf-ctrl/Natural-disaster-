@@ -51,8 +51,11 @@ def main():
                        "entries": [{"type": "minecraft:alternatives", "children": children}]}],
             "random_sequence": f"{NS}:blocks/{block}",
         })
-    dump(os.path.join(DATA, "minecraft", "tags", "block", "mineable", "shovel.json"),
-         {"replace": False, "values": [f"{NS}:{b}" for b in LAYERS]})
+    # Shared tag: other disasters (scorched earth, volcanic ash) add their own blocks, so merge instead of overwrite.
+    tag = os.path.join(DATA, "minecraft", "tags", "block", "mineable", "shovel.json")
+    values = json.load(open(tag))["values"] if os.path.exists(tag) else []
+    values += [v for v in (f"{NS}:{b}" for b in LAYERS) if v not in values]
+    dump(tag, {"replace": False, "values": values})
 
 
 if __name__ == "__main__":
