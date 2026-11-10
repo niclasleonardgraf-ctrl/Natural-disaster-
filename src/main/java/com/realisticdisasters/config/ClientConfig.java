@@ -12,6 +12,7 @@ public final class ClientConfig {
     public static final ModConfigSpec.DoubleValue PARTICLE_DENSITY;
     public static final ModConfigSpec.BooleanValue FOG;
     public static final ModConfigSpec.BooleanValue SKY_TINT;
+    public static final ModConfigSpec.BooleanValue MESH_FUNNEL;
 
     static {
         B.push("camera");
@@ -24,6 +25,8 @@ public final class ClientConfig {
                 .defineInRange("particleDensity", 1.0, 0.0, 2.0);
         FOG = B.comment("Custom disaster fog.").define("fog", true);
         SKY_TINT = B.comment("Custom sky / cloud tint.").define("skyTint", true);
+        MESH_FUNNEL = B.comment("Draw the tornado funnel as a 3D mesh with animated textures (off = particle funnel).")
+                .define("meshFunnel", true);
         B.pop();
     }
 
