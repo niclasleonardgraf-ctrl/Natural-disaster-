@@ -4,6 +4,6 @@
   "package": "com.realisticdisasters.mixin",
   "compatibilityLevel": "JAVA_25",
   "mixins": [],
-  "client": ["ClientLevelMixin", "QuadParticleGroupMixin"],
+  "client": ["ClientLevelMixin", "QuadParticleGroupMixin", "CameraMixin"],
   "injectors": { "defaultRequire": 1 }
 }

@@ -33,6 +33,15 @@ public final class DisasterConfig {
     public static final ModConfigSpec.BooleanValue TORNADO_CHANGES_WEATHER;
     public static final ModConfigSpec.ConfigValue<List<? extends String>> TORNADO_BIOMES;
 
+    // ---- earthquake ----
+    public static final ModConfigSpec.BooleanValue EARTHQUAKE_ENABLED;
+    public static final ModConfigSpec.IntValue EARTHQUAKE_WEIGHT;
+    public static final ModConfigSpec.IntValue EARTHQUAKE_MAX_DEBRIS;
+    public static final ModConfigSpec.DoubleValue EARTHQUAKE_DURATION_SCALE;
+    public static final ModConfigSpec.BooleanValue EARTHQUAKE_FISSURES;
+    public static final ModConfigSpec.DoubleValue EARTHQUAKE_FISSURE_LENGTH_SCALE;
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> EARTHQUAKE_BIOMES;
+
     static {
         B.push("general");
         NATURAL_SPAWNING = B.comment("Whether disasters start naturally near players.")
@@ -78,6 +87,26 @@ public final class DisasterConfig {
                         "minecraft:meadow", "minecraft:forest", "minecraft:birch_forest", "minecraft:flower_forest",
                         "minecraft:swamp", "minecraft:badlands", "minecraft:wooded_badlands"),
                         () -> "minecraft:plains", o -> o instanceof String);
+        B.pop();
+
+        B.push("earthquake");
+        EARTHQUAKE_ENABLED = B.define("enabled", true);
+        EARTHQUAKE_WEIGHT = B.comment("Relative weight when picking a natural disaster.")
+                .defineInRange("weight", 10, 0, 1000);
+        EARTHQUAKE_MAX_DEBRIS = B.comment("Max falling-block debris entities per earthquake (scaled by intensity / 5).")
+                .defineInRange("maxDebris", 120, 0, 400);
+        EARTHQUAKE_DURATION_SCALE = B.comment("Multiplier for how long the main shock lasts.")
+                .defineInRange("durationScale", 1.0, 0.1, 10.0);
+        EARTHQUAKE_FISSURES = B.comment("Whether fissures open in the ground (needs blockDestruction).")
+                .define("fissures", true);
+        EARTHQUAKE_FISSURE_LENGTH_SCALE = B.comment("Multiplier for fissure length.")
+                .defineInRange("fissureLengthScale", 1.0, 0.1, 4.0);
+        EARTHQUAKE_BIOMES = B.comment("Biomes (ids or #tags) where earthquakes can happen naturally.")
+                .defineListAllowEmpty("biomes", List.of(
+                        "#minecraft:is_mountain", "#minecraft:is_badlands", "#minecraft:is_hill",
+                        "minecraft:stony_shore", "minecraft:windswept_gravelly_hills", "minecraft:windswept_savanna",
+                        "minecraft:savanna_plateau", "minecraft:desert"),
+                        () -> "#minecraft:is_mountain", o -> o instanceof String);
         B.pop();
     }
 

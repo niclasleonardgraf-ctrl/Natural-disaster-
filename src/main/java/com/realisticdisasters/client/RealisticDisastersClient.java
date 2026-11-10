@@ -2,6 +2,7 @@ package com.realisticdisasters.client;
 
 import com.realisticdisasters.RealisticDisasters;
 import com.realisticdisasters.client.particle.VortexParticle;
+import com.realisticdisasters.client.particle.QuakeDustParticle;
 import com.realisticdisasters.network.DisasterRemovePayload;
 import com.realisticdisasters.network.DisasterSyncPayload;
 import com.realisticdisasters.registry.ModRegistries;
@@ -38,5 +39,7 @@ public class RealisticDisastersClient {
         event.registerSpriteSet(ModRegistries.CLOUD_BAND.get(), s -> VortexParticle.provider(VortexParticle.Kind.BAND, s));
         event.registerSpriteSet(ModRegistries.RAIN_SHAFT.get(), s -> VortexParticle.provider(VortexParticle.Kind.RAIN, s));
         event.registerSpriteSet(ModRegistries.DUST_CLOUD.get(), s -> VortexParticle.provider(VortexParticle.Kind.DUST, s));
+        event.registerSpriteSet(ModRegistries.QUAKE_DUST.get(), QuakeDustParticle::provider);
+        event.registerSpriteSet(ModRegistries.COLLAPSE_DUST.get(), QuakeDustParticle::collapseProvider);
     }
 }
