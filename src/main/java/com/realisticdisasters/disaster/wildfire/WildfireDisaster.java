@@ -185,6 +185,23 @@ public class WildfireDisaster extends Disaster {
         return out;
     }
 
+    /** Fuel moisture changes slowly: cached per 4x4-block cell, refreshed every 10 s (biome, water, rain, time of day). */
+    private final it.unimi.dsi.fastutil.longs.Long2FloatOpenHashMap drynessCache = new it.unimi.dsi.fastutil.longs.Long2FloatOpenHashMap();
+    private final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap drynessAge = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
+
+    private float dryness(int x, int ground, int z, boolean rainSlows) {
+        long cell = BlockPos.asLong(x >> 2, 0, z >> 2);
+        float d;
+        if (!drynessAge.containsKey(cell) || age() - drynessAge.get(cell) > 200) {
+            d = FireFuel.dryness(level, x, ground, z, rainSlows);
+            drynessCache.put(cell, d);
+            drynessAge.put(cell, age());
+        } else {
+            d = drynessCache.get(cell);
+        }
+        return d * drought();
+    }
+
     /**
      * Fire danger: intensity stands for how long the land has been in drought (like a fire-danger index). Cured,
      * drought-stressed fuels ignite far more readily than the same vegetation after a wet spell.
@@ -227,6 +244,8 @@ public class WildfireDisaster extends Disaster {
         index.clear();
         embers.clear();
         whirl = null;
+        drynessCache.clear();
+        drynessAge.clear();
     }
 
     @Override
@@ -353,7 +372,7 @@ public class WildfireDisaster extends Disaster {
                 visited.add(key);
                 continue;
             }
-            float chance = col.ignitability() * FireFuel.dryness(level, x, col.ground(), z, rainSlows) * drought();
+            float chance = col.ignitability() * dryness(x, col.ground(), z, rainSlows);
             // head fire gets a boost, backing fire is held back (flame tilt / pre-heating by the wind)
             chance *= (float) Mth.clamp(1 + 0.7 * u * cosToWind, 0.25, 1.8);
             boolean forestEdge = col.type() == FireFuel.FOREST || srcFuel == FireFuel.FOREST;
@@ -570,7 +589,7 @@ public class WildfireDisaster extends Disaster {
                 case FireFuel.FOREST -> 0.35f;
                 default -> 0.25f; // roofs, hay
             };
-            if (random.nextFloat() < receptive * FireFuel.dryness(level, bx, col.ground(), bz, rainSlows) * drought()) {
+            if (random.nextFloat() < receptive * dryness(bx, col.ground(), bz, rainSlows)) {
                 ignite(bx, bz, col, false);
                 spotFires++;
             }
