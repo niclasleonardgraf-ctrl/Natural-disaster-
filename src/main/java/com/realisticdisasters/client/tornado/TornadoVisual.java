@@ -6,6 +6,7 @@ import com.realisticdisasters.client.sound.DisasterLoopSound;
 import com.realisticdisasters.config.ClientConfig;
 import com.realisticdisasters.disaster.Phase;
 import com.realisticdisasters.disaster.tornado.TornadoDisaster;
+import com.realisticdisasters.disaster.tornado.TornadoWind;
 import com.realisticdisasters.registry.ModRegistries;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
@@ -38,7 +39,10 @@ public final class TornadoVisual implements DisasterVisual {
     private static final RandomSource RANDOM = RandomSource.create();
 
     private static final class State {
-        DisasterLoopSound roar, distant;
+        DisasterLoopSound roar, distant, core, howl;
+        float shelter;
+        float localWind;
+        int nextRattle = 20;
         int nextRumble = 40;
         int nextGust = 80;
         int nextFlash = 30;
@@ -272,25 +276,72 @@ public final class TornadoVisual implements DisasterVisual {
                 d.id, h, jitter);
     }
 
+    /** The tornado's wind field, rebuilt on the client from synced data (same model the server uses). */
+    public static TornadoWind wind(ClientDisaster d) {
+        return new TornadoWind(d.pos(), coreRadius(d), height(d), d.intensity,
+                d.data(TornadoDisaster.D_HEADING_X), d.data(TornadoDisaster.D_HEADING_Z), d.data(TornadoDisaster.D_SPEED),
+                d.strength() * touchdown(d));
+    }
+
+    /**
+     * Layered sound, mixed like real recordings: a far "freight train" rumble, a mid-range roar, an overwhelming
+     * core roar when it is on top of you, a wind howl driven by the actual wind speed at your position, and debris
+     * rattling around you. Everything above the rumble is muffled when you are sheltered.
+     */
     private void tickSounds(ClientDisaster d, State st, Vec3 cam) {
         Minecraft mc = Minecraft.getInstance();
         var sounds = mc.getSoundManager();
-        if (st.roar == null || st.roar.isStopped()) {
-            // Close layer: positional roar, audible within ~100 blocks.
-            st.roar = new DisasterLoopSound(ModRegistries.TORNADO_ROAR.get(), d, true,
-                    x -> x.strength() * (0.35 + touchdown(x) * 0.65) * (2.5 + x.intensity * 0.5),
-                    x -> 0.85 + 0.05 * (5 - x.intensity));
-            sounds.play(st.roar);
-        }
+        // Shelter: under a roof / underground the high, violent layers are muffled; the low rumble comes through.
+        boolean open = mc.level != null && mc.level.canSeeSky(BlockPos.containing(cam));
+        st.shelter += ((open ? 0f : 1f) - st.shelter) * 0.1f;
+        TornadoWind wind = wind(d);
+        double localWind = wind.at(cam.x, cam.y, cam.z).length();
+        st.localWind += (float) ((localWind - st.localWind) * 0.2);
+        double vmax = TornadoWind.maxWind(d.intensity);
+
         if (st.distant == null || st.distant.isStopped()) {
-            // Distant layer: non-attenuated low rumble that fades with distance and under the roar.
             st.distant = new DisasterLoopSound(ModRegistries.TORNADO_DISTANT.get(), d, false,
                     x -> {
-                        double dist = horizontalDistance(x, Minecraft.getInstance().gameRenderer.getMainCamera().position());
-                        return x.strength() * 0.7 * (1 - smoothstep(40f, 380f, (float) dist)) * (0.5 + 0.1 * x.intensity);
+                        double dist = horizontalDistance(x, camPos());
+                        double far = 1 - smoothstep(250f, 750f, (float) dist);
+                        return x.strength() * (0.5 + 0.1 * x.intensity) * far * (1 - 0.15 * st.shelter);
                     },
-                    x -> 1.0);
+                    x -> 0.9 + 0.1 * (1 - smoothstep(60f, 400f, (float) horizontalDistance(x, camPos()))));
             sounds.play(st.distant);
+        }
+        if (st.roar == null || st.roar.isStopped()) {
+            st.roar = new DisasterLoopSound(ModRegistries.TORNADO_ROAR.get(), d, true,
+                    x -> x.strength() * (0.3 + touchdown(x) * 0.7) * (1.2 + x.intensity * 0.2) * (1 - 0.55 * st.shelter),
+                    x -> 0.85 + 0.04 * (5 - x.intensity));
+            sounds.play(st.roar);
+        }
+        if (st.core == null || st.core.isStopped()) {
+            st.core = new DisasterLoopSound(ModRegistries.TORNADO_CORE.get(), d, false,
+                    x -> {
+                        double dist = horizontalDistance(x, camPos());
+                        float rc = coreRadius(x);
+                        double near = 1 - smoothstep(rc * 1.2f, rc * 5.5f, (float) dist);
+                        return x.strength() * touchdown(x) * near * (0.7 + 0.08 * x.intensity) * (1 - 0.7 * st.shelter);
+                    },
+                    x -> 0.9 + 0.1 * Math.min(1, st.localWind / vmax));
+            sounds.play(st.core);
+        }
+        if (st.howl == null || st.howl.isStopped()) {
+            st.howl = new DisasterLoopSound(ModRegistries.WIND_HOWL.get(), d, false,
+                    x -> Math.min(1.0, st.localWind / (vmax * 0.55)) * 0.85 * (1 - 0.75 * st.shelter),
+                    x -> 0.7 + 0.55 * Math.min(1.0, st.localWind / vmax));
+            sounds.play(st.howl);
+        }
+
+        // Debris pelting the surroundings when you are in the wind field.
+        double ratio = st.localWind / vmax;
+        if (ratio > 0.25 && --st.nextRattle <= 0) {
+            st.nextRattle = 6 + RANDOM.nextInt(Math.max(4, (int) (30 * (1 - ratio))));
+            double a = RANDOM.nextDouble() * Math.PI * 2;
+            double r = 3 + RANDOM.nextDouble() * 8;
+            sounds.play(new SimpleSoundInstance(ModRegistries.DEBRIS_RATTLE.get().location(), SoundSource.WEATHER,
+                    (float) Math.min(1.0, ratio) * (1 - 0.6f * st.shelter), 0.85f + RANDOM.nextFloat() * 0.3f, RANDOM, false, 0,
+                    SoundInstance.Attenuation.LINEAR, cam.x + Math.cos(a) * r, cam.y + RANDOM.nextDouble() * 3, cam.z + Math.sin(a) * r, false));
         }
 
         double dist = horizontalDistance(d, cam);
@@ -330,11 +381,17 @@ public final class TornadoVisual implements DisasterVisual {
         }
     }
 
+    private static Vec3 camPos() {
+        return Minecraft.getInstance().gameRenderer.getMainCamera().position();
+    }
+
     @Override
     public void onRemoved(ClientDisaster d) {
         if (d.visualState instanceof State st) {
             if (st.roar != null) st.roar.end();
             if (st.distant != null) st.distant.end();
+            if (st.core != null) st.core.end();
+            if (st.howl != null) st.howl.end();
         }
     }
 

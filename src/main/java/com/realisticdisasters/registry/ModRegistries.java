@@ -21,6 +21,11 @@ public final class ModRegistries {
     public static final DeferredHolder<SoundEvent, SoundEvent> TORNADO_DISTANT = sound("disaster.tornado.distant");
     public static final DeferredHolder<SoundEvent, SoundEvent> DISTANT_RUMBLE = sound("disaster.rumble");
     public static final DeferredHolder<SoundEvent, SoundEvent> WIND_GUST = sound("disaster.wind_gust");
+    public static final DeferredHolder<SoundEvent, SoundEvent> TORNADO_CORE = sound("disaster.tornado.core");
+    public static final DeferredHolder<SoundEvent, SoundEvent> WIND_HOWL = sound("disaster.wind_howl");
+    public static final DeferredHolder<SoundEvent, SoundEvent> DEBRIS_THUD = sound("disaster.debris_thud");
+    public static final DeferredHolder<SoundEvent, SoundEvent> WOOD_SNAP = sound("disaster.wood_snap");
+    public static final DeferredHolder<SoundEvent, SoundEvent> DEBRIS_RATTLE = sound("disaster.debris_rattle");
 
     // Particles
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> FUNNEL_CLOUD =
