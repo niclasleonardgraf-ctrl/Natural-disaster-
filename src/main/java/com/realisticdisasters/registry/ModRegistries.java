@@ -54,6 +54,10 @@ public final class ModRegistries {
             PARTICLES.register("ash_fall", () -> new SimpleParticleType(false));
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> ASH_TRAIL =
             PARTICLES.register("ash_trail", () -> new SimpleParticleType(false));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> ASH_CURTAIN =
+            PARTICLES.register("ash_curtain", () -> new SimpleParticleType(true));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> LAVA_SPARK =
+            PARTICLES.register("lava_spark", () -> new SimpleParticleType(false));
 
     // Entities
     public static final DeferredRegister.Entities ENTITY_TYPES = DeferredRegister.createEntities(RealisticDisasters.MODID);

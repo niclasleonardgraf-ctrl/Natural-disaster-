@@ -192,17 +192,19 @@ def rain_shaft(seed, size=64):
     return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
 
 
-def ash_cloud(seed, size=64):
-    """Volcanic ash billow: dense, cauliflower-like puff with a crisp, lumpy rim and a dark, shadowed underside."""
+def ash_cloud(seed, size=128):
+    """Volcanic ash billow: dense, cauliflower-like puff with a soft, lumpy rim and a dark, shadowed underside.
+    128 px because these puffs are drawn up to ~40 blocks wide."""
     import numpy as np
     rng = np.random.default_rng(seed)
     n = fbm(size, rng, octaves=6, base=4)
     y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
-    r = np.sqrt(x * x + y * y) + (n - 0.5) * 0.55     # lumpy outline
-    t = np.clip((0.92 - r) / 0.28, 0, 1)
-    a = t * t * (3 - 2 * t) * np.clip(0.75 + 0.6 * n, 0, 1)
-    # strong top/bottom contrast: lit crown, dark base (the colour itself is tinted in code)
-    light = np.clip(0.45 + 0.4 * (-y * 0.5 + 0.5) + 0.3 * (n - 0.5), 0, 1)
+    r = np.sqrt(x * x + y * y) + (n - 0.5) * 0.55     # lumpy, cauliflower outline
+    t = np.clip((0.95 - r) / 0.3, 0, 1)               # soft but defined rim, so individual billows read
+    a = t * t * (3 - 2 * t) * np.clip(0.8 + 0.5 * n, 0, 1)
+    # strong top/bottom contrast: sunlit crown, dark shadowed base (the colour itself is tinted in code)
+    top = np.clip(-y * 0.5 + 0.5 - (r - 0.4) * 0.35, 0, 1)
+    light = np.clip(0.32 + 0.62 * top + 0.3 * (n - 0.5), 0, 1)
     rgb = (light * 255).astype("uint8")
     return Image.fromarray(np.dstack([rgb, rgb, rgb, (np.clip(a, 0, 1) * 255).astype("uint8")]), "RGBA")
 
@@ -217,6 +219,36 @@ def ash_flake(seed, size=16):
     t = np.clip((0.75 - r) / 0.45, 0, 1)
     a = t * t * (3 - 2 * t)
     light = np.clip(0.72 + 0.2 * (n - 0.5), 0, 1)
+    rgb = (light * 255).astype("uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
+
+
+def ash_shaft(seed, size=64):
+    """Ash fall-out curtain: soft, slightly slanted vertical streaks hanging from the cloud, fading at the ends."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    cols = fbm(size, rng, octaves=3, base=6)[0]
+    streak = np.tile(np.clip((cols - 0.3) * 2.0, 0, 1), (size, 1))
+    y = np.linspace(-1, 1, size)[:, None]
+    x = np.linspace(-1, 1, size)[None, :]
+    fade = np.clip(1 - np.abs(y + 0.15) ** 2.5, 0, 1) * np.clip(1 - np.abs(x) ** 2, 0, 1)
+    detail = fbm(size, rng, octaves=4, base=3) * 0.7 + 0.3
+    a = np.clip(streak * fade * detail * 1.2, 0, 1)
+    rgb = np.full((size, size), 190, dtype="uint8")
+    return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
+
+
+def lava_spark(seed, size=16):
+    """Incandescent clot: white-hot core with a soft glow falloff (coloured by temperature in code)."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    n = fbm(size, rng, octaves=2, base=2)
+    y, x = np.mgrid[0:size, 0:size] / (size - 1) * 2 - 1
+    r = np.sqrt(x * x + y * y) * (0.9 + 0.25 * n)
+    core = np.clip(1 - r / 0.45, 0, 1)
+    halo = np.clip(1 - r, 0, 1) ** 2
+    a = np.clip(core * 1.5 + halo * 0.7, 0, 1)
+    light = np.clip(0.75 + 0.25 * core, 0, 1)
     rgb = (light * 255).astype("uint8")
     return Image.fromarray(np.dstack([rgb, rgb, rgb, (a * 255).astype("uint8")]), "RGBA")
 
@@ -239,6 +271,10 @@ def main():
         write(ash_cloud(600 + i), f"ash_cloud_{i}")
     for i in range(3):
         write(ash_flake(700 + i), f"ash_fall_{i}")
+    for i in range(4):
+        write(ash_shaft(800 + i), f"ash_shaft_{i}")
+    for i in range(3):
+        write(lava_spark(900 + i), f"lava_spark_{i}")
 
     # 16x16 mod icon (tornado silhouette on a storm sky), upscaled with nearest neighbour for the mod list.
     icon = Image.new("RGBA", (16, 16), (78, 91, 71, 255))

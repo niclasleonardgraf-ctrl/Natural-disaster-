@@ -141,7 +141,8 @@ public class LavaBombEntity extends ThrowableItemProjectile {
             for (int dz = -rad; dz <= rad; dz++) {
                 if (dx * dx + dz * dz > rad * rad + 1) continue;
                 boolean isCore = dx == 0 && dz == 0;
-                if (!isCore && rng.nextFloat() < 0.35f) continue;
+                // a coherent little crater: full inner ring, ragged outer ring
+                if (dx * dx + dz * dz > 2 && rng.nextFloat() < 0.5f) continue;
                 // walk to the local surface (within ±2 blocks)
                 BlockPos p = core.offset(dx, 2, dz);
                 for (int i = 0; i < 5 && (level.getBlockState(p).isAir() || level.getBlockState(p).canBeReplaced()); i++) p = p.below();
@@ -165,25 +166,19 @@ public class LavaBombEntity extends ThrowableItemProjectile {
                 }
                 BlockState burnt;
                 if (isCore) {
-                    burnt = Blocks.MAGMA_BLOCK.defaultBlockState();
+                    // the bomb itself: a lump of dark scoria, some still glowing inside
+                    burnt = rng.nextFloat() < 0.35f ? Blocks.MAGMA_BLOCK.defaultBlockState() : Blocks.BLACKSTONE.defaultBlockState();
                 } else if (st.is(BlockTags.DIRT) || st.is(Blocks.GRASS_BLOCK) || st.is(Blocks.MOSS_BLOCK)) {
-                    burnt = rng.nextFloat() < 0.75f ? Blocks.COARSE_DIRT.defaultBlockState() : Blocks.BLACKSTONE.defaultBlockState();
+                    burnt = Blocks.COARSE_DIRT.defaultBlockState();
                 } else if (st.is(BlockTags.SAND)) {
                     continue; // sand just takes the heat
                 } else if (st.is(Blocks.SNOW_BLOCK) || st.is(Blocks.POWDER_SNOW) || st.is(Blocks.ICE)) {
                     burnt = Blocks.AIR.defaultBlockState();
-                } else if (rng.nextFloat() < 0.4f) {
-                    burnt = Blocks.BLACKSTONE.defaultBlockState();
                 } else {
-                    continue;
+                    continue; // rock just takes the hit
                 }
+                // Bare soil and rock don't burn: fires only start where there is something to burn (handled above).
                 level.setBlock(p, burnt, 3);
-                if (!isCore && rng.nextFloat() < 0.12f + intensity * 0.03f) {
-                    BlockPos fire = p.above();
-                    if (level.getBlockState(fire).isAir() && BaseFireBlock.canBePlacedAt(level, fire, net.minecraft.core.Direction.UP)) {
-                        level.setBlock(fire, BaseFireBlock.getState(level, fire), 11);
-                    }
-                }
             }
         }
     }

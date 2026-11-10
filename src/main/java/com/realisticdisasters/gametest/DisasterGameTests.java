@@ -194,7 +194,9 @@ public final class DisasterGameTests {
         DisasterConfig.VOLCANO_COOLING_TICKS.set(60);
         VolcanoDisaster volcano = startPeakVolcano(helper, 3);
         helper.succeedWhen(() -> {
-            helper.assertTrue(volcano.lavaCooled() >= 4, "lava has not cooled yet (" + volcano.lavaCooled() + "/" + volcano.lavaPlaced() + ")");
+            helper.assertTrue(volcano.lavaCooled() >= 4, "lava has not crusted over yet (" + volcano.lavaCooled() + "/" + volcano.lavaPlaced() + ")");
+            helper.assertTrue(volcano.rockFormed() >= 3, "crust has not turned into rock yet (" + volcano.rockFormed() + ")");
+            helper.assertTrue(volcanicBlocks(helper, true) >= 3, "no basalt / blackstone found");
             DisasterConfig.VOLCANO_COOLING_TICKS.set(900);
             DisasterManager.stop(helper.getLevel(), volcano.id(), false);
         });
@@ -236,8 +238,8 @@ public final class DisasterGameTests {
         helper.runAfterDelay(300, () -> {
             double cost = DisasterManager.averageTickCostMs(helper.getLevel());
             DisasterManager.stop(helper.getLevel(), volcano.id(), false);
-            RealisticDisasters.LOGGER.info("Volcano intensity 3 average server cost: {} ms/tick (bombs {}, lava {}, cone {})",
-                    String.format("%.3f", cost), volcano.bombsLaunched(), volcano.lavaPlaced(), volcano.coneBlocks());
+            RealisticDisasters.LOGGER.info("Volcano intensity 3 average server cost: {} ms/tick (bombs {}, lava {}, cone {}, lightning {})",
+                    String.format("%.3f", cost), volcano.bombsLaunched(), volcano.lavaPlaced(), volcano.coneBlocks(), volcano.lightningStrikes());
             helper.assertTrue(cost < 2.0, "volcano too expensive: " + cost + " ms/tick");
             helper.succeed();
         });

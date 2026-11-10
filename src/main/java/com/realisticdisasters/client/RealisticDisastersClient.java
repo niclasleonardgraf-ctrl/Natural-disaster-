@@ -3,6 +3,9 @@ package com.realisticdisasters.client;
 import com.realisticdisasters.RealisticDisasters;
 import com.realisticdisasters.client.particle.VortexParticle;
 import com.realisticdisasters.client.volcano.AshParticle;
+import com.realisticdisasters.client.volcano.SmokeLayer;
+import com.realisticdisasters.client.volcano.SparkParticle;
+import net.neoforged.neoforge.client.event.RegisterRenderPipelinesEvent;
 import com.realisticdisasters.client.volcano.VolcanoVisual;
 import com.realisticdisasters.disaster.volcano.LavaBombEntity;
 import net.minecraft.client.renderer.entity.ThrownItemRenderer;
@@ -27,6 +30,7 @@ public class RealisticDisastersClient {
         modBus.addListener(RealisticDisastersClient::registerPayloadHandlers);
         modBus.addListener(RealisticDisastersClient::registerParticles);
         modBus.addListener(RealisticDisastersClient::registerEntityRenderers);
+        modBus.addListener((RegisterRenderPipelinesEvent e) -> e.registerPipeline(SmokeLayer.PIPELINE));
         LavaBombEntity.CLIENT_TRAIL = VolcanoVisual::bombTrail;
     }
 
@@ -48,6 +52,8 @@ public class RealisticDisastersClient {
         event.registerSpriteSet(ModRegistries.ASH_CLOUD.get(), s -> AshParticle.provider(AshParticle.Kind.PLUME, s));
         event.registerSpriteSet(ModRegistries.ASH_TRAIL.get(), s -> AshParticle.provider(AshParticle.Kind.TRAIL, s));
         event.registerSpriteSet(ModRegistries.ASH_FALL.get(), s -> AshParticle.provider(AshParticle.Kind.FALL, s));
+        event.registerSpriteSet(ModRegistries.ASH_CURTAIN.get(), s -> AshParticle.provider(AshParticle.Kind.CURTAIN, s));
+        event.registerSpriteSet(ModRegistries.LAVA_SPARK.get(), SparkParticle::provider);
     }
 
     private static void registerEntityRenderers(EntityRenderersEvent.RegisterRenderers event) {

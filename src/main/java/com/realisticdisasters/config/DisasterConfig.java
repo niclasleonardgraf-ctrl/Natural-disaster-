@@ -42,6 +42,7 @@ public final class DisasterConfig {
     public static final ModConfigSpec.BooleanValue VOLCANO_BUILD_CONE;
     public static final ModConfigSpec.BooleanValue VOLCANO_LAVA_FLOWS;
     public static final ModConfigSpec.IntValue VOLCANO_COOLING_TICKS;
+    public static final ModConfigSpec.BooleanValue VOLCANO_LIGHTNING;
 
     static {
         B.push("general");
@@ -109,6 +110,8 @@ public final class DisasterConfig {
                 .define("lavaFlows", true);
         VOLCANO_COOLING_TICKS = B.comment("Ticks before placed lava cools into basalt / blackstone (always cooled when the volcano ends).")
                 .defineInRange("coolingTicks", 900, 20, 72_000);
+        VOLCANO_LIGHTNING = B.comment("Volcanic lightning in the ash column (visual only, never starts fires).")
+                .define("lightning", true);
         B.pop();
     }
 
