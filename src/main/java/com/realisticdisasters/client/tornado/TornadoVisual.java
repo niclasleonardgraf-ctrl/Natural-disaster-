@@ -71,6 +71,12 @@ public final class TornadoVisual implements DisasterVisual {
         return r;
     }
 
+    /** Height of the cloud base above the tornado's ground point at {@code ring} core radii from the axis. */
+    public static double cloudBaseHeight(ClientDisaster d, float ring) {
+        float t = Mth.clamp((ring - 1.5f) / 8f, 0f, 1f);
+        return height(d) * (0.86 + 0.12 * (t * t * (3 - 2 * t)));
+    }
+
     /**
      * Horizontal offset of the funnel axis at a height fraction: the top trails behind the direction of travel and
      * the column snakes slowly, so it never reads as a straight pillar.
@@ -103,8 +109,8 @@ public final class TornadoVisual implements DisasterVisual {
         out.fogColor(FOG, w);
         out.darken(w * (0.25f + d.intensity * 0.06f));
         // Rain haze, not a wall: the funnel must stay visible from 100+ blocks.
-        float fogEnd = 160f + (5 - d.intensity) * 20f + (float) dist * 0.8f;
-        out.fog(fogEnd, w * (d.phase == Phase.WARNING ? 0.3f : 0.5f));
+        float fogEnd = 220f + (5 - d.intensity) * 20f + (float) dist;
+        out.fog(fogEnd, w * (d.phase == Phase.WARNING ? 0.25f : 0.4f));
 
         float td = touchdown(d);
         float core = coreRadius(d);
@@ -150,24 +156,33 @@ public final class TornadoVisual implements DisasterVisual {
 
         float s = d.strength();
         float td = touchdown(d);
+        // Every quad particle in the game shares one 16384-entry queue (oldest evicted first), so the per-tick
+        // budget is sized to stay around 11k live particles at worst; otherwise the long-lived cloud base would
+        // be evicted by the funnel.
         float budget = (22 + d.intensity * 14) * density * lod;
 
-        // Wall cloud / mesocyclone base: present from the warning phase on, slowly turning.
-        int wallCount = count(budget * 0.2f * Math.max(0.35f, s));
-        for (int i = 0; i < wallCount; i++) {
-            float ring = 0.8f + RANDOM.nextFloat() * 3.0f;           // lowered wall cloud around the funnel top
-            spawnAt(level, ModRegistries.WALL_CLOUD.get(), d, 0.86f, ring * core, ring, height);
+        // Cloud base, built from flat, downward-facing sheets so it reads as one continuous ceiling receding in
+        // perspective. It is lowest (the wall cloud) around the funnel and rises outward in a gentle step.
+        float baseRate = Math.max(0.35f, s) * Math.max(0.5f, density);
+        int wallSheets = count(0.35f * baseRate * (1 + d.intensity * 0.15f));
+        for (int i = 0; i < wallSheets; i++) {
+            float ring = 0.3f + RANDOM.nextFloat() * 3.2f;
+            spawnAt(level, ModRegistries.CLOUD_SHEET.get(), d, 0.9f, ring * core, ring, height);
         }
-        // Storm deck: sparse, huge, slowly turning cloud base that covers the sky for ~150 blocks.
-        int deckCount = count((1.6f + d.intensity * 0.3f) * Math.max(0.3f, s) * Math.max(0.5f, density));
-        for (int i = 0; i < deckCount; i++) {
-            float ring = 4f + (float) Math.sqrt(RANDOM.nextFloat()) * 14f;
-            spawnAt(level, ModRegistries.WALL_CLOUD.get(), d, 0.97f, ring * core, ring, height);
+        int deckSheets = count(0.9f * baseRate * (1 + d.intensity * 0.12f));
+        for (int i = 0; i < deckSheets; i++) {
+            float ring = 3.5f + (float) Math.sqrt(RANDOM.nextFloat()) * 15f;
+            spawnAt(level, ModRegistries.CLOUD_SHEET.get(), d, 0.95f, ring * core, ring, height);
         }
-
+        // Rotating concentric striations in the base (the "mothership" look of a strong supercell).
+        int bands = count(0.6f * baseRate);
+        for (int i = 0; i < bands; i++) {
+            float ring = 1.8f + RANDOM.nextFloat() * 10f;
+            spawnAt(level, ModRegistries.CLOUD_BAND.get(), d, 0.92f, ring * core, ring, height);
+        }
         // Rain curtains hanging from the cloud base on the rear flank (behind the direction of travel).
         if (dist < 400) {
-            int rainCount = count(budget * 0.12f * Math.max(0.3f, s));
+            int rainCount = count(budget * 0.08f * Math.max(0.3f, s));
             float hx = d.data(TornadoDisaster.D_HEADING_X), hz = d.data(TornadoDisaster.D_HEADING_Z);
             double back = Math.atan2(-hz, -hx);
             for (int i = 0; i < rainCount; i++) {
@@ -184,32 +199,38 @@ public final class TornadoVisual implements DisasterVisual {
         // Condensation funnel lowering from the cloud base.
         float bottom = (1f - td) * 0.78f;
         if (td > 0.02f || d.phase == Phase.BUILDUP) {
-            int funnelCount = count(budget * 2.4f * s);
+            int funnelCount = count(budget * 0.9f * s);
             for (int i = 0; i < funnelCount; i++) {
                 // bias toward the lower funnel, where it is thin and needs density to read as solid
                 float u = RANDOM.nextFloat();
                 // stop below the flare: the soft wall cloud takes over there (crisp funnel puffs look like bubbles)
                 float h = bottom + (u * u) * (0.8f - bottom);
                 // mostly a tight outer shell (crisp edge) plus some fill
-                float jitter = RANDOM.nextFloat() < 0.75f ? 0.9f + RANDOM.nextFloat() * 0.1f : 0.4f + RANDOM.nextFloat() * 0.5f;
-                spawnAt(level, ModRegistries.FUNNEL_CLOUD.get(), d, h, funnelRadius(d, h) * jitter, jitter, height);
+                if (RANDOM.nextFloat() < 0.55f) {
+                    // streaked surface panels: the funnel's skin with helical striations
+                    spawnAt(level, ModRegistries.FUNNEL_SURFACE.get(), d, h, funnelRadius(d, h) * 0.96, 1f, height);
+                } else {
+                    // soft puffs at the silhouette and some fill
+                    float jitter = RANDOM.nextFloat() < 0.75f ? 0.95f + RANDOM.nextFloat() * 0.08f : 0.4f + RANDOM.nextFloat() * 0.5f;
+                    spawnAt(level, ModRegistries.FUNNEL_CLOUD.get(), d, h, funnelRadius(d, h) * jitter, jitter, height);
+                }
             }
         }
 
         if (td > 0.35f && dist < 300) {
             // Debris cloud at the base, flecks whipped around it, dust streamers feeding in.
-            int dustCount = count(budget * 0.7f * td);
+            int dustCount = count(budget * 0.35f * td);
             for (int i = 0; i < dustCount; i++) {
                 float jitter = RANDOM.nextFloat();
                 spawnAt(level, ModRegistries.DUST_CLOUD.get(), d, RANDOM.nextFloat() * 0.15f, core * (0.5 + 1.3 * jitter), jitter, height);
             }
-            int debrisCount = count(budget * 0.3f * td);
+            int debrisCount = count(budget * 0.2f * td);
             for (int i = 0; i < debrisCount; i++) {
                 float jitter = 0.8f + RANDOM.nextFloat() * 0.6f;
                 float h = RANDOM.nextFloat() * 0.15f;
                 spawnAt(level, ModRegistries.STORM_DEBRIS.get(), d, h, funnelRadius(d, h) * jitter * 1.25, jitter, height);
             }
-            int inflowCount = count(budget * 0.15f * td);
+            int inflowCount = count(budget * 0.1f * td);
             for (int i = 0; i < inflowCount; i++) {
                 float jitter = 3.5f + RANDOM.nextFloat() * 3f;
                 spawnAt(level, ModRegistries.DUST_INFLOW.get(), d, 0f, core * jitter, jitter, height);
