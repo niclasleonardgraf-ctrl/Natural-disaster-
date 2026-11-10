@@ -131,7 +131,7 @@ public final class DisasterConfig {
         TORNADO_WEIGHT = B.comment("Relative weight when picking a natural disaster.")
                 .defineInRange("weight", 10, 0, 1000);
         TORNADO_MAX_DEBRIS = B.comment("Max airborne falling-block debris entities per tornado (scaled by intensity / 5).")
-                .defineInRange("maxDebris", 60, 0, 400);
+                .defineInRange("maxDebris", 160, 0, 600);
         TORNADO_DURATION_SCALE = B.comment("Multiplier for how long a tornado stays on the ground.")
                 .defineInRange("durationScale", 1.0, 0.1, 10.0);
         TORNADO_CHANGES_WEATHER = B.comment("Start rain/thunder while a tornado is active.")

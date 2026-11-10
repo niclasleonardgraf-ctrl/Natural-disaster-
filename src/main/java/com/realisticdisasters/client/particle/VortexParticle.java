@@ -98,8 +98,8 @@ public class VortexParticle extends SingleQuadParticle {
             case WALL -> {
                 lifetime = 160 + r.nextInt(120);
                 spin = 0.01f + r.nextFloat() * 0.008f;
-                shade = 0.12f + r.nextFloat() * 0.05f;
-                alpha = 0.85f + r.nextFloat() * 0.15f;
+                shade = 0.24f + r.nextFloat() * 0.06f;   // low contrast against the dark sky: reads as cloud
+                alpha = 0.45f + r.nextFloat() * 0.25f;
                 minBlockLight = 5;
             }
             case SHEET -> {

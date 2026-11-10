@@ -65,10 +65,9 @@ public final class FunnelRenderer {
                          float edgeSoftness) {}
 
     private static final Layer[] LAYERS = {
-            new Layer(CORE, 1.25f, 1.35f, 5f, 28f, 1.0f, 0.010f, 0.06f, 0.46f, 0.47f, 0.50f, false, 0.3f),
-            new Layer(VEIL, 1.38f, 0.7f, 6f, 22f, 1.25f, 0.018f, 0.09f, 0.66f, 0.67f, 0.69f, false, 0.45f),
-            new Layer(VEIL, 1.55f, 0.38f, 4f, 34f, 0.8f, 0.008f, 0.05f, 0.70f, 0.71f, 0.72f, false, 0.55f),
-            new Layer(DEBRIS, 1.0f, 0.4f, 4f, 9f, 1.4f, 0.03f, 0.3f, 0.34f, 0.30f, 0.26f, true, 0.85f),
+            // one opaque condensation tube with a subtle texture (veil layers read as stripes, not cloud)
+            new Layer(CORE, 1.25f, 1.6f, 2f, 40f, 1.0f, 0.008f, 0.03f, 0.44f, 0.45f, 0.47f, false, 0.22f),
+            new Layer(DEBRIS, 1.0f, 0.45f, 4f, 9f, 1.4f, 0.03f, 0.3f, 0.36f, 0.32f, 0.28f, true, 0.85f),
     };
 
     @SubscribeEvent
@@ -206,7 +205,7 @@ public final class FunnelRenderer {
                 // lit flank vs. shadowed flank, darker higher up where it meets the cloud base
                 float lit = Math.max(0f, nnx * LX + nny * LY + nnz * LZ);
                 // strong key light: bright lit flank, dark shadow flank (reads against dark sky and bright horizon)
-                float s = (0.28f + 1.05f * lit) * (1f - 0.25f * h);
+                float s = (0.55f + 0.6f * lit) * (1f - 0.2f * h);
                 if (!layer.debris && h < 0.2f) s *= 0.9f;
                 s *= 1f + flash * 0.6f;
                 shade[i][j] = s;

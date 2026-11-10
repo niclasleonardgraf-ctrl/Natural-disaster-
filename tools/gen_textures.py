@@ -281,8 +281,9 @@ def funnel_core_texture(seed, w=256, h=512):
     streaks = pfbm(w, h, rng, octaves=5, base_x=24, base_y=2)        # stretched: long vertical streaks
     cells = pfbm(w, h, rng, octaves=5, base_x=4, base_y=6)
     fine = pfbm(w, h, rng, octaves=4, base_x=32, base_y=32)
-    light = 0.55 + 0.72 * (streaks - 0.5) + 0.42 * (cells - 0.5) + 0.15 * (fine - 0.5)
-    alpha = np.clip(0.88 + 0.5 * (cells - 0.5) + 0.25 * (streaks - 0.5), 0.6, 1.0)
+    # subtle: a real condensation funnel reads as a smooth, solid tube; strong streaks look like a curtain
+    light = 0.6 + 0.22 * (streaks - 0.5) + 0.3 * (cells - 0.5) + 0.08 * (fine - 0.5)
+    alpha = np.full_like(light, 1.0)
     return to_rgba(light, alpha)
 
 
