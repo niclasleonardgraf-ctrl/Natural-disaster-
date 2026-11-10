@@ -72,6 +72,7 @@ public class EarthquakeDisaster extends Disaster {
     private final ArrayDeque<BlockPos> pendingChecks = new ArrayDeque<>();
     private final Set<BlockPos> pendingSet = new HashSet<>();
 
+    private final EarthquakePhysics physics;
     private float tremor;
     private float roll;
     private float dust;
@@ -120,6 +121,7 @@ public class EarthquakeDisaster extends Disaster {
         this.fissureHalfWidth = 0.4f + i * 0.25f;          // 1 .. 3 blocks wide
         this.fissureDepth = 2 + i * 2;                     // 4 .. 12 deep
         this.nextShock = 40 + random.nextInt(60);
+        this.physics = new EarthquakePhysics(this, level, random, this.intensity);
 
         double scale = DisasterConfig.EARTHQUAKE_DURATION_SCALE.get();
         setDuration(Phase.WARNING, 420);
@@ -175,6 +177,8 @@ public class EarthquakeDisaster extends Disaster {
 
     @Override
     protected void onEnd() {
+        physics.clearStagger(true, java.util.Set.of());
+        physics.releaseTopples();
         debris.clear();
         pendingChecks.clear();
         pendingSet.clear();
@@ -188,11 +192,19 @@ public class EarthquakeDisaster extends Disaster {
         updateTremor();
 
         if (age() % 20 == 0 && phase() != Phase.AFTERMATH) alertMobs();
-        if (tremor > 0.08f && age() % 2 == 0) shakeEntities();
+        if (age() % 2 == 0) {
+            if (tremor > 0.08f) shakeEntities();
+            else physics.clearStagger(true, java.util.Set.of());
+        }
 
         if (DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean()) {
-            if (tremor > 0.25f) crumble();
+            if (tremor > 0.25f) {
+                crumble();
+                physics.scanNearPlayers(radius);
+            }
             growFissures();
+            physics.tickSlides();
+            physics.tickTopples();
             processSupportChecks();
             sweepCanopies();
         }
@@ -208,7 +220,7 @@ public class EarthquakeDisaster extends Disaster {
         return roll;
     }
 
-    private void addDust(float amount) {
+    void addDust(float amount) {
         dust = Math.min(1f, dust + amount);
     }
 
@@ -283,12 +295,17 @@ public class EarthquakeDisaster extends Disaster {
     private void shakeEntities() {
         AABB box = new AABB(pos.x - radius, pos.y - 24, pos.z - radius, pos.x + radius, pos.y + 40, pos.z + radius);
         DamageSource source = level.damageSources().source(ModRegistries.EARTHQUAKE_DAMAGE);
+        java.util.Set<java.util.UUID> staggering = new java.util.HashSet<>();
         for (LivingEntity e : level.getEntitiesOfClass(LivingEntity.class, box, e -> !e.isSpectator() && e.onGround())) {
             if (e instanceof Player pl && (pl.getAbilities().flying || pl.isCreative())) continue;
             double dx = e.getX() - pos.x, dz = e.getZ() - pos.z;
             double d = Math.sqrt(dx * dx + dz * dz);
             if (d > radius) continue;
             float near = 1f - (float) (d / radius);
+            if (e instanceof Player pl) {
+                physics.stagger(pl, 0.4f + 0.6f * near);
+                staggering.add(pl.getUUID());
+            }
             float push = 0.035f * tremor * (0.5f + 0.15f * intensity) * (0.4f + 0.6f * near);
             double hop = tremor > 0.7f && random.nextFloat() < 0.15f * near ? 0.12 + 0.03 * intensity : 0;
             e.push((random.nextDouble() - 0.5) * 2 * push, hop, (random.nextDouble() - 0.5) * 2 * push);
@@ -298,6 +315,8 @@ public class EarthquakeDisaster extends Disaster {
                 e.hurtServer(level, source, 0.5f * (intensity - 2));
             }
         }
+        physics.clearStagger(false, staggering);
+        physics.shakeObjects(box, radius, age() % 20 == 0);
     }
 
     // ------------------------------------------------------------------ mob reactions
@@ -338,32 +357,38 @@ public class EarthquakeDisaster extends Disaster {
         }
 
         int interval = Math.max(2, 9 - intensity);
-        if (age() % interval != 0) return;
+        boolean due = age() % interval == 0;
         BlockChangeQueue queue = DisasterManager.blockQueue(level);
         List<Fissure> branches = new ArrayList<>();
         for (Fissure f : fissures) {
             if (f.done()) continue;
-            // Real ruptures zig-zag: mostly straight runs with sudden kinks, plus small wander.
-            f.heading += (random.nextDouble() - 0.5) * 0.18;
-            if (--f.nextKink <= 0) {
-                f.heading += (random.nextBoolean() ? 1 : -1) * (0.35 + random.nextDouble() * 0.45);
-                f.nextKink = 2 + random.nextInt(4);
-            }
-            f.x += Math.cos(f.heading);
-            f.z += Math.sin(f.heading);
-            float along = (f.step + 0.5f) / f.steps;
-            f.step++;
-            // Widest in the middle, tapering to a hairline at both ends.
-            float taper = (float) Math.sin(Math.PI * along);
-            float half = fissureHalfWidth * f.scale * (0.35f + 0.65f * taper) * (0.75f + 0.5f * random.nextFloat());
-            int depth = Math.max(1, Math.round(fissureDepth * f.scale * (0.4f + 0.6f * taper) * (0.7f + 0.6f * random.nextFloat())));
-            carveStep(queue, f, half, depth, taper);
-            lastCrack = age();
-            // En-echelon cracks: short, narrow fractures splaying off the main rupture at an angle.
-            if (f.scale >= 1f && random.nextFloat() < 0.14f && fissures.size() + branches.size() < maxFissures * 6) {
-                double side = random.nextBoolean() ? 1 : -1;
-                branches.add(new Fissure(f.x, f.z, f.heading + side * (0.5 + random.nextDouble() * 0.5),
-                        3 + random.nextInt(4), 0.45f, 0, 0));
+            // The main rupture races across the ground as the strong shaking arrives (several steps per tick),
+            // then the cracks keep working open more slowly.
+            boolean racing = f == fissures.get(0) && f.step < f.steps * 0.6f;
+            int steps = racing ? 1 + intensity / 2 : due ? 1 : 0;
+            for (int k = 0; k < steps && !f.done(); k++) {
+                // Real ruptures zig-zag: mostly straight runs with sudden kinks, plus small wander.
+                f.heading += (random.nextDouble() - 0.5) * 0.18;
+                if (--f.nextKink <= 0) {
+                    f.heading += (random.nextBoolean() ? 1 : -1) * (0.35 + random.nextDouble() * 0.45);
+                    f.nextKink = 2 + random.nextInt(4);
+                }
+                f.x += Math.cos(f.heading);
+                f.z += Math.sin(f.heading);
+                float along = (f.step + 0.5f) / f.steps;
+                f.step++;
+                // Widest in the middle, tapering to a hairline at both ends.
+                float taper = (float) Math.sin(Math.PI * along);
+                float half = fissureHalfWidth * f.scale * (0.35f + 0.65f * taper) * (0.75f + 0.5f * random.nextFloat());
+                int depth = Math.max(1, Math.round(fissureDepth * f.scale * (0.4f + 0.6f * taper) * (0.7f + 0.6f * random.nextFloat())));
+                carveStep(queue, f, half, depth, taper);
+                lastCrack = age();
+                // En-echelon cracks: short, narrow fractures splaying off the main rupture at an angle.
+                if (f.scale >= 1f && random.nextFloat() < 0.14f && fissures.size() + branches.size() < maxFissures * 6) {
+                    double side = random.nextBoolean() ? 1 : -1;
+                    branches.add(new Fissure(f.x, f.z, f.heading + side * (0.5 + random.nextDouble() * 0.5),
+                            3 + random.nextInt(4), 0.45f, 0, 0));
+                }
             }
         }
         fissures.addAll(branches);
@@ -500,6 +525,8 @@ public class EarthquakeDisaster extends Disaster {
             float falloff = 1f - 0.6f * (float) (r / radius);
             int top = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1;
             if (top < pos.y - 32 || top > pos.y + 48) continue;
+            BlockState topState = level.getBlockState(new BlockPos(x, top, z));
+            if (terrain(topState)) physics.considerSlope(x, z, top, falloff);
             for (int y = top; y > top - 8; y--) {
                 evaluate(new BlockPos(x, y, z), falloff);
             }
@@ -515,28 +542,36 @@ public class EarthquakeDisaster extends Disaster {
         }
     }
 
-    private void queueCheck(BlockPos bp) {
+    void queueCheck(BlockPos bp) {
         if (pendingSet.size() >= MAX_PENDING_CHECKS || !pendingSet.add(bp)) return;
         pendingChecks.add(bp);
     }
 
-    /** Neighbours needed to hold an unsupported block (bridging); at intensity 5 nothing hangs in the air. */
-    private int neighboursNeeded() {
-        return intensity;
+    /** A log with leaves above it (a living tree rather than a log beam in a building). */
+    private boolean hasCanopy(BlockPos log) {
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
+        for (int y = 1; y <= 10; y++) {
+            BlockState st = level.getBlockState(m.set(log.getX(), log.getY() + y, log.getZ()));
+            if (st.is(BlockTags.LEAVES)) return true;
+            if (!st.is(BlockTags.LOGS)) return false;
+        }
+        return false;
     }
 
-    private static boolean solid(BlockState st) {
+    static boolean solid(BlockState st) {
         return !st.isAir() && !st.canBeReplaced() && st.getFluidState().isEmpty();
     }
 
-    private static boolean terrain(BlockState st) {
+    static boolean terrain(BlockState st) {
         return st.is(BlockTags.DIRT) || st.is(BlockTags.SAND) || st.is(BlockTags.BASE_STONE_OVERWORLD)
                 || st.is(Blocks.GRAVEL) || st.is(BlockTags.SNOW) || st.is(BlockTags.TERRACOTTA)
                 || st.is(Blocks.CLAY) || st.is(Blocks.SANDSTONE) || st.is(Blocks.RED_SANDSTONE);
     }
 
-    private void evaluate(BlockPos bp, float chanceScale) {
+    void evaluate(BlockPos bp, float chanceScale) {
         BlockState st = level.getBlockState(bp);
+        if (st.isAir()) return;
+        if (physics.reactFixture(bp, st, chanceScale)) return;
         if (!solid(st) || st.hasBlockEntity() || st.is(BlockTags.LEAVES)) return;
         if (st.getCollisionShape(level, bp).isEmpty()) return;
         float hardness = st.getDestroySpeed(level, bp);
@@ -561,18 +596,25 @@ public class EarthquakeDisaster extends Disaster {
 
         BlockState below = level.getBlockState(bp.below());
         if (!solid(below)) {
-            int neighbours = 0;
-            for (Direction dir : Direction.Plane.HORIZONTAL) {
-                if (solid(level.getBlockState(bp.relative(dir)))) neighbours++;
+            // An undermined tree goes over as a whole instead of dissolving log by log.
+            if (st.is(BlockTags.LOGS) && hasCanopy(bp)) {
+                if (random.nextFloat() < 0.5f * chanceScale) physics.toppleTree(bp);
+                return;
             }
-            if (neighbours < neighboursNeeded() && random.nextFloat() < 0.5f * chanceScale) {
+            // Load path: is something on the ground within this material's (shaking-reduced) span?
+            int span = physics.effectiveSpan(st, hardness);
+            if (!physics.hasLoadPath(bp, span) && random.nextFloat() < 0.6f * chanceScale) {
                 DisasterManager.blockQueue(level).add(l -> collapse(bp, st, Vec3.ZERO));
             }
             return;
         }
 
-        // Walls shed their top courses: loose blocks with a free side get thrown off.
-        if (intensity >= 3 && !terrain(st) && !solid(level.getBlockState(bp.above()))
+        // Top of a free-standing column (chimney, tower, pillar): it may snap and topple as one piece.
+        if (!terrain(st) && !solid(level.getBlockState(bp.above())) && physics.considerTopple(bp, chanceScale)) return;
+
+        // Walls shed their top courses: loose blocks with a free side get thrown off. Only real wall tops (sitting on
+        // more masonry / wood, not rubble lying on the ground).
+        if (intensity >= 3 && !terrain(st) && !terrain(below) && !solid(level.getBlockState(bp.above()))
                 && random.nextFloat() < 0.04f * (intensity - 2) * tremor * chanceScale) {
             List<Direction> free = new ArrayList<>(4);
             for (Direction dir : Direction.Plane.HORIZONTAL) {
@@ -609,7 +651,15 @@ public class EarthquakeDisaster extends Disaster {
         queueNeighbours(bp);
     }
 
-    private void collapse(BlockPos bp, BlockState expected, Vec3 push) {
+    float maxHardness() {
+        return maxHardness;
+    }
+
+    void trackDebris(FallingBlockEntity fb) {
+        debris.add(fb);
+    }
+
+    void collapse(BlockPos bp, BlockState expected, Vec3 push) {
         if (isFinished() || level.getBlockState(bp) != expected) return;
         if (!DisasterProtection.canModify(level, bp, expected)) return;
         debris.removeIf(fb -> fb.isRemoved() || fb.time > 200);
@@ -661,7 +711,7 @@ public class EarthquakeDisaster extends Disaster {
         }
     }
 
-    private void queueNeighbours(BlockPos bp) {
+    void queueNeighbours(BlockPos bp) {
         queueCheck(bp.above());
         for (Direction dir : Direction.Plane.HORIZONTAL) queueCheck(bp.relative(dir));
     }
@@ -672,6 +722,16 @@ public class EarthquakeDisaster extends Disaster {
         for (ServerPlayer p : level.players()) {
             if (p.distanceToSqr(pos.x, p.getY(), pos.z) < range * range) p.sendOverlayMessage(message);
         }
+    }
+
+    /** Topples the free-standing structure whose top block is {@code top} immediately (GameTests / admin use). */
+    public boolean toppleNow(BlockPos top, Vec3 direction) {
+        return physics.toppleNow(top, direction);
+    }
+
+    /** Lets the current shaking act on one block, as if the sampler had picked it (GameTests use). */
+    public void shakeBlock(BlockPos pos, float chanceScale) {
+        if (DisasterConfig.BLOCK_DESTRUCTION.getAsBoolean()) evaluate(pos, chanceScale);
     }
 
     public int fissureCount() {

@@ -41,6 +41,9 @@ public final class DisasterGameTests {
         FUNCTIONS.register("earthquake_respects_block_toggle", () -> DisasterGameTests::earthquakeRespectsBlockToggle);
         FUNCTIONS.register("earthquake_intensity3_tick_cost", () -> DisasterGameTests::earthquakeTickCost);
         FUNCTIONS.register("earthquake_mobs_flee", () -> DisasterGameTests::earthquakeMobsFlee);
+        FUNCTIONS.register("earthquake_tower_topples", () -> DisasterGameTests::earthquakeTowerTopples);
+        FUNCTIONS.register("earthquake_fixtures_react", () -> DisasterGameTests::earthquakeFixturesReact);
+        FUNCTIONS.register("earthquake_minor_spares_houses", () -> DisasterGameTests::earthquakeMinorSparesHouses);
     }
 
     public static void register(IEventBus modBus) {
@@ -57,6 +60,9 @@ public final class DisasterGameTests {
         add(event, "earthquake_respects_block_toggle", event.registerEnvironment(ModRegistries.id("env_quake_toggle")), 300, "earthquake_arena");
         add(event, "earthquake_intensity3_tick_cost", event.registerEnvironment(ModRegistries.id("env_quake_perf")), 400, "earthquake_arena");
         add(event, "earthquake_mobs_flee", event.registerEnvironment(ModRegistries.id("env_quake_flee")), 300, "earthquake_arena");
+        add(event, "earthquake_tower_topples", event.registerEnvironment(ModRegistries.id("env_quake_topple")), 260, "earthquake_arena");
+        add(event, "earthquake_fixtures_react", event.registerEnvironment(ModRegistries.id("env_quake_fixtures")), 200, "earthquake_arena");
+        add(event, "earthquake_minor_spares_houses", event.registerEnvironment(ModRegistries.id("env_quake_minor")), 400, "earthquake_arena");
     }
 
     private static void add(RegisterGameTestsEvent event, String name, Holder<TestEnvironmentDefinition<?>> env, int maxTicks) {
@@ -159,6 +165,13 @@ public final class DisasterGameTests {
 
     // ------------------------------------------------------------------ earthquake
 
+    /** Ends the quake and removes debris still in flight, so it can't land in the next test's arena. */
+    private static void stopQuake(GameTestHelper helper, Disaster quake) {
+        DisasterManager.stop(helper.getLevel(), quake.id(), false);
+        helper.getLevel().getEntitiesOfClass(net.minecraft.world.entity.item.FallingBlockEntity.class,
+                helper.getBounds().inflate(32)).forEach(net.minecraft.world.entity.Entity::discard);
+    }
+
     /** Epicentre in the middle of the earthquake arena, on the grass (y 9 is the top soil). */
     private static Disaster startEarthquake(GameTestHelper helper, int intensity, Phase phase) {
         DisasterConfig.SPAWN_PROTECTION_RADIUS.set(0);
@@ -200,10 +213,7 @@ public final class DisasterGameTests {
             helper.assertTrue(helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(12, 10, 12))).is(Blocks.CRACKED_STONE_BRICKS)
                     || structures.entrySet().stream().anyMatch(e -> helper.getLevel().getBlockState(e.getKey()).is(Blocks.CRACKED_STONE_BRICKS)),
                     "stone bricks should crack");
-            DisasterManager.stop(helper.getLevel(), quake.id(), false);
-            // Don't let debris still in flight land in the next test's arena.
-            helper.getLevel().getEntitiesOfClass(net.minecraft.world.entity.item.FallingBlockEntity.class,
-                    helper.getBounds().inflate(32)).forEach(net.minecraft.world.entity.Entity::discard);
+            stopQuake(helper, quake);
         });
     }
 
@@ -218,7 +228,7 @@ public final class DisasterGameTests {
         Disaster quake = startEarthquake(helper, 5, Phase.PEAK);
         int[] debris = {0};
         helper.onEachTick(() -> debris[0] += helper.getLevel().getEntitiesOfClass(
-                net.minecraft.world.entity.item.FallingBlockEntity.class, helper.getBounds().inflate(8)).size());
+                net.minecraft.world.entity.item.FallingBlockEntity.class, helper.getBounds().deflate(4)).size());
         helper.runAfterDelay(220, () -> {
             int count = 0;
             StringBuilder changed = new StringBuilder();
@@ -230,7 +240,7 @@ public final class DisasterGameTests {
                 }
             }
             DisasterConfig.BLOCK_DESTRUCTION.set(true);
-            DisasterManager.stop(helper.getLevel(), quake.id(), false);
+            stopQuake(helper, quake);
             helper.assertTrue(count == 0, "blocks changed although destruction is disabled: " + count + " " + changed);
             helper.assertTrue(debris[0] == 0, "falling-block debris spawned although destruction is disabled");
             helper.succeed();
@@ -242,9 +252,81 @@ public final class DisasterGameTests {
         for (int i = 0; i < 6; i++) helper.spawn(EntityType.COW, new BlockPos(6 + i * 5, 10, 8));
         helper.runAfterDelay(300, () -> {
             double cost = DisasterManager.averageTickCostMs(helper.getLevel());
-            DisasterManager.stop(helper.getLevel(), quake.id(), false);
+            stopQuake(helper, quake);
             RealisticDisasters.LOGGER.info("Earthquake intensity 3 average server cost: {} ms/tick", String.format("%.3f", cost));
             helper.assertTrue(cost < 2.0, "earthquake too expensive: " + cost + " ms/tick");
+            helper.succeed();
+        });
+    }
+
+    /**
+     * The stone-brick pillar (x 12-13, y 10-15, z 12) snapped and pushed toward +x must fall over like a rigid body:
+     * its blocks land spread out several blocks away, not in a heap at its foot.
+     */
+    private static void earthquakeTowerTopples(GameTestHelper helper) {
+        DisasterConfig.EARTHQUAKE_FISSURES.set(false);
+        var quakeD = startEarthquake(helper, 4, Phase.PEAK);
+        var quake = (com.realisticdisasters.disaster.earthquake.EarthquakeDisaster) quakeD;
+        helper.assertTrue(quake.toppleNow(helper.absolutePos(new BlockPos(12, 15, 12)), new Vec3(1, 0, 0)), "pillar did not topple");
+        helper.runAfterDelay(150, () -> {
+            DisasterConfig.EARTHQUAKE_FISSURES.set(true);
+            stopQuake(helper, quake);
+            int far = 0, standing = 0;
+            StringBuilder where = new StringBuilder();
+            for (int x = 0; x < 40; x++)
+                for (int y = 10; y < 16; y++)
+                    for (int z = 6; z < 19; z++) {
+                        var st = helper.getLevel().getBlockState(helper.absolutePos(new BlockPos(x, y, z)));
+                        if (!st.is(Blocks.STONE_BRICKS) && !st.is(Blocks.CRACKED_STONE_BRICKS)) continue;
+                        where.append(x).append(',').append(y).append(',').append(z).append(' ');
+                        if (x >= 16) far++;
+                        if ((x == 12 || x == 13) && z == 12 && y >= 12) standing++;
+                    }
+            helper.assertTrue(standing == 0, "the pillar is still standing (" + standing + " blocks): " + where);
+            helper.assertTrue(far >= 3, "the pillar did not fall over sideways (" + far + " blocks landed 3+ blocks away): " + where);
+            helper.succeed();
+        });
+    }
+
+    /** Doors bang and hanging lanterns fall when the shaking reaches them. */
+    private static void earthquakeFixturesReact(GameTestHelper helper) {
+        DisasterConfig.EARTHQUAKE_FISSURES.set(false);
+        BlockPos door = new BlockPos(16, 10, 32), lantern = new BlockPos(27, 13, 27);
+        helper.setBlock(door, Blocks.OAK_DOOR.defaultBlockState());
+        helper.setBlock(door.above(), Blocks.OAK_DOOR.defaultBlockState().setValue(net.minecraft.world.level.block.DoorBlock.HALF,
+                net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER));
+        helper.setBlock(lantern, Blocks.LANTERN.defaultBlockState().setValue(net.minecraft.world.level.block.LanternBlock.HANGING, true));
+        var quake = (com.realisticdisasters.disaster.earthquake.EarthquakeDisaster) startEarthquake(helper, 4, Phase.PEAK);
+        boolean[] doorMoved = {false};
+        helper.onEachTick(() -> {
+            quake.shakeBlock(helper.absolutePos(door), 3f);
+            quake.shakeBlock(helper.absolutePos(lantern), 3f);
+            var st = helper.getLevel().getBlockState(helper.absolutePos(door));
+            if (st.getBlock() instanceof net.minecraft.world.level.block.DoorBlock && st.getValue(net.minecraft.world.level.block.DoorBlock.OPEN)) doorMoved[0] = true;
+        });
+        helper.succeedWhen(() -> {
+            helper.assertTrue(doorMoved[0], "the door never swung open");
+            helper.assertTrue(!helper.getLevel().getBlockState(helper.absolutePos(lantern)).is(Blocks.LANTERN), "the hanging lantern is still up");
+            DisasterConfig.EARTHQUAKE_FISSURES.set(true);
+            stopQuake(helper, quake);
+        });
+    }
+
+    /** A minor (intensity 1) quake rattles things but leaves an ordinary house standing: roof and walls intact. */
+    private static void earthquakeMinorSparesHouses(GameTestHelper helper) {
+        DisasterConfig.EARTHQUAKE_FISSURES.set(false);
+        var before = snapshot(helper, 10, 15);
+        before.keySet().removeIf(p -> {
+            BlockPos r = helper.relativePos(p);
+            return r.getX() < 24 || r.getX() > 30 || r.getZ() < 24 || r.getZ() > 30 || before.get(p).isAir()
+                    || before.get(p).is(Blocks.GLASS);
+        });
+        Disaster quake = startEarthquake(helper, 1, Phase.PEAK);
+        helper.runAfterDelay(300, () -> {
+            long changed = before.entrySet().stream().filter(e -> helper.getLevel().getBlockState(e.getKey()) != e.getValue()).count();
+            DisasterConfig.EARTHQUAKE_FISSURES.set(true);
+            stopQuake(helper, quake);
+            helper.assertTrue(changed <= 2, "a minor quake damaged the house (" + changed + " blocks)");
             helper.succeed();
         });
     }
@@ -258,7 +340,7 @@ public final class DisasterGameTests {
         helper.succeedWhen(() -> {
             double dist = Math.hypot(pig.getX() - epicentre.x, pig.getZ() - epicentre.z);
             helper.assertTrue(dist > startDist + 6, "pig did not flee (distance " + String.format("%.1f", dist) + ")");
-            DisasterManager.stop(helper.getLevel(), quake.id(), false);
+            stopQuake(helper, quake);
         });
     }
 
